@@ -9,6 +9,11 @@ router_instance = Router()
 @router.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     req_json = await request.json()
+    if req_json.get("stream"):
+        return JSONResponse(
+            content={"error": {"message": "Streaming is not currently supported by this gateway.", "type": "invalid_request_error"}},
+            status_code=400
+        )
     messages = req_json.get("messages", [])
     
     try:
