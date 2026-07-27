@@ -33,6 +33,12 @@ class Router:
                     f"field(s): {', '.join(sorted(missing))}"
                 )
         self.providers.sort(key=lambda p: p["tier"])
+        for provider in self.providers:
+            if not os.getenv(provider["api_key_env"]):
+                logger.warning(
+                    f"Provider '{provider['name']}' has no API key set via "
+                    f"{provider['api_key_env']}. It will be unavailable."
+                )
         self.health_tracker = HealthTracker()
         self.client = httpx.AsyncClient()
 
