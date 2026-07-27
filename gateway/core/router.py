@@ -63,7 +63,7 @@ class Router:
                     f"{provider['base_url']}/chat/completions",
                     headers=headers,
                     json=payload,
-                    timeout=30.0
+                    timeout=httpx.Timeout(connect=5.0, read=60.0, write=5.0, pool=2.0)
                 )
                 
                 if resp.status_code == 429 or resp.status_code >= 500:
