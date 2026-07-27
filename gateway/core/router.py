@@ -1,11 +1,18 @@
 # gateway/core/router.py
 import os
+import json
 import httpx
 import yaml
 import logging
 from gateway.core.provider_health import HealthTracker
 
 logger = logging.getLogger("gateway.router")
+
+class UpstreamClientError(Exception):
+    def __init__(self, status_code: int, body: dict):
+        self.status_code = status_code
+        self.body = body
+        super().__init__(str(body))
 
 class Router:
     def __init__(self, config_path=None):
@@ -59,6 +66,19 @@ class Router:
                 resp.raise_for_status()
                 self.health_tracker.record_success(name)
                 return resp.json()
+                    
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                if status in (401, 403):
+                    logger.warning(f"Auth error from {name} ({status}). Failover to next provider.")
+                    self.health_tracker.record_failure(name)
+                    continue
+                body = await e.response.aread()
+                try:
+                    parsed = json.loads(body)
+                except json.JSONDecodeError:
+                    parsed = {"raw": body.decode(errors="replace")}
+                raise UpstreamClientError(status_code=status, body=parsed) from e
                     
             except httpx.RequestError as e:
                 logger.error(f"Network error with {name}: {e}. Triggering failover.")
