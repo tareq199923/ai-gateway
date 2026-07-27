@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 # gateway/main.py
 import os
 import logging
