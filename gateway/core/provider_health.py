@@ -4,7 +4,6 @@ class ProviderHealth:
     def __init__(self):
         self.consecutive_failures = 0
         self.cooldown_until = None
-        self.recent_request_count = 0
 
 class HealthTracker:
     def __init__(self):
