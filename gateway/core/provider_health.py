@@ -20,7 +20,7 @@ class HealthTracker:
         health.consecutive_failures += 1
         # 30s, 60s, 120s, 240s, capped at 300s
         cooldown_seconds = min(30 * (2 ** health.consecutive_failures), 300)
-        health.cooldown_until = time.time() + cooldown_seconds
+        health.cooldown_until = time.monotonic() + cooldown_seconds
 
     def record_success(self, provider_name: str):
         health = self.get(provider_name)
@@ -31,6 +31,6 @@ class HealthTracker:
         health = self.get(provider_name)
         if health.cooldown_until is None:
             return True
-        if time.time() > health.cooldown_until:
+        if time.monotonic() > health.cooldown_until:
             return True
         return False
