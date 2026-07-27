@@ -24,6 +24,14 @@ class Router:
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
         self.providers = config.get("providers", [])
+        required_fields = {"name", "tier", "base_url", "api_key_env", "model_id"}
+        for provider in self.providers:
+            missing = required_fields - set(provider.keys())
+            if missing:
+                raise ValueError(
+                    f"Provider '{provider.get('name', 'unnamed')}' is missing required "
+                    f"field(s): {', '.join(sorted(missing))}"
+                )
         self.providers.sort(key=lambda p: p["tier"])
         self.health_tracker = HealthTracker()
         self.client = httpx.AsyncClient()
