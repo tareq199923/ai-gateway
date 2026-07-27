@@ -1,12 +1,20 @@
 # gateway/main.py
 import os
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Request, HTTPException
 from gateway.endpoints.openai_compat import router as openai_router
+from gateway.core.router import Router
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="AI Continuity Gateway")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.router = Router()
+    yield
+    await app.state.router.close()
+
+app = FastAPI(title="AI Continuity Gateway", lifespan=lifespan)
 
 async def require_auth(request: Request):
     gateway_key = os.getenv("GATEWAY_API_KEY")

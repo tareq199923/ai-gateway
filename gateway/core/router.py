@@ -19,6 +19,7 @@ class Router:
         self.providers = config.get("providers", [])
         self.providers.sort(key=lambda p: p["tier"])
         self.health_tracker = HealthTracker()
+        self.client = httpx.AsyncClient()
 
     async def route_request(self, messages: list) -> dict:
         for provider in self.providers:
@@ -43,22 +44,21 @@ class Router:
             }
 
             try:
-                async with httpx.AsyncClient() as client:
-                    resp = await client.post(
-                        f"{provider['base_url']}/chat/completions",
-                        headers=headers,
-                        json=payload,
-                        timeout=30.0
-                    )
+                resp = await self.client.post(
+                    f"{provider['base_url']}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=30.0
+                )
+                
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    logger.warning(f"Provider {name} returned {resp.status_code}. Triggering failover.")
+                    self.health_tracker.record_failure(name)
+                    continue
                     
-                    if resp.status_code == 429 or resp.status_code >= 500:
-                        logger.warning(f"Provider {name} returned {resp.status_code}. Triggering failover.")
-                        self.health_tracker.record_failure(name)
-                        continue
-                        
-                    resp.raise_for_status()
-                    self.health_tracker.record_success(name)
-                    return resp.json()
+                resp.raise_for_status()
+                self.health_tracker.record_success(name)
+                return resp.json()
                     
             except httpx.RequestError as e:
                 logger.error(f"Network error with {name}: {e}. Triggering failover.")
@@ -66,3 +66,6 @@ class Router:
                 continue
                 
         raise Exception("All providers failed or are in cooldown.")
+
+    async def close(self):
+        await self.client.aclose()
