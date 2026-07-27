@@ -78,8 +78,8 @@ class Router:
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
                 if status in (401, 403):
-                    logger.warning(f"Auth error from {name} ({status}). Failover to next provider.")
-                    self.health_tracker.record_failure(name)
+                    logger.warning(f"Auth error from {name} ({status}). Disabling provider.")
+                    self.health_tracker.disable(name)
                     continue
                 body = await e.response.aread()
                 try:
