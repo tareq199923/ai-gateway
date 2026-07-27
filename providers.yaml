@@ -1,0 +1,21 @@
+providers:
+  - name: gemini-flash
+    tier: 1
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    api_key_env: GEMINI_API_KEY
+    model_id: gemini-2.5-flash-preview-04-17
+    max_context: 1000000
+
+  - name: groq-llama
+    tier: 2
+    base_url: https://api.groq.com/openai/v1
+    api_key_env: GROQ_API_KEY
+    model_id: llama-3.3-70b-versatile
+    max_context: 128000
+
+  - name: openrouter-fallback
+    tier: 3
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    model_id: meta-llama/llama-3.1-8b-instruct:free
+    max_context: 32000
