@@ -3,6 +3,7 @@ import pytest
 import yaml
 
 from gateway.core.router import Router
+from gateway.core.session_store import SessionStore
 from gateway.main import app
 
 
@@ -84,12 +85,16 @@ def router_setter(make_router):
 async def client(router_setter, monkeypatch):
     monkeypatch.setenv("GATEWAY_API_KEY", "test-gateway-key")
     router_setter({})
+    store = SessionStore(db_path=":memory:")
+    await store.init()
+    app.state.sessions = store
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as async_client:
         yield async_client
     for router in router_setter.routers:
         await router.close()
+    await store.close()
 
 
 def provider_body(provider_name, content="hello"):

@@ -8,14 +8,18 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Request, HTTPException
 from gateway.endpoints.openai_compat import router as openai_router
 from gateway.core.router import Router
+from gateway.core.session_store import SessionStore
 
 logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.router = Router()
+    app.state.sessions = SessionStore()
+    await app.state.sessions.init()
     yield
     await app.state.router.close()
+    await app.state.sessions.close()
 
 app = FastAPI(title="AI Continuity Gateway", lifespan=lifespan)
 

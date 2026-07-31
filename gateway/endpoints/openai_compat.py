@@ -19,8 +19,17 @@ async def chat_completions(request: Request, body: ChatRequest):
             status_code=400
         )
     
+    session_id = request.headers.get("X-Session-Id", "default")
+    store = request.app.state.sessions
+
+    history = await store.load(session_id)
+    full_messages = history + body.messages
+
     try:
-        result = await request.app.state.router.route_request(body.messages)
+        result = await request.app.state.router.route_request(full_messages)
+        choices = result.get("choices") or []
+        if choices and "message" in choices[0]:
+            await store.save(session_id, full_messages + [choices[0]["message"]])
         return JSONResponse(content=result)
     except UpstreamClientError as e:
         return JSONResponse(
