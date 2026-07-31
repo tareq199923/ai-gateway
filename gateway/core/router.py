@@ -8,6 +8,18 @@ from gateway.core.provider_health import HealthTracker
 
 logger = logging.getLogger("gateway.router")
 
+DEFAULT_TIMEOUT_CONFIG = {"connect": 5.0, "read": 60.0, "write": 5.0, "pool": 2.0}
+
+
+def resolve_timeout(provider: dict) -> httpx.Timeout:
+    """Build an httpx.Timeout for a provider, using its own `timeout:` block
+    from providers.yaml where present, falling back to DEFAULT_TIMEOUT_CONFIG
+    field-by-field for anything the provider doesn't override."""
+    cfg = {**DEFAULT_TIMEOUT_CONFIG, **(provider.get("timeout") or {})}
+    return httpx.Timeout(
+        connect=cfg["connect"], read=cfg["read"], write=cfg["write"], pool=cfg["pool"]
+    )
+
 class UpstreamClientError(Exception):
     def __init__(self, status_code: int, body: dict):
         self.status_code = status_code
@@ -69,7 +81,7 @@ class Router:
                     f"{provider['base_url']}/chat/completions",
                     headers=headers,
                     json=payload,
-                    timeout=httpx.Timeout(connect=5.0, read=60.0, write=5.0, pool=2.0)
+                    timeout=resolve_timeout(provider)
                 )
                 
                 if resp.status_code == 429 or resp.status_code >= 500:

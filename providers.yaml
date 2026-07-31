@@ -5,6 +5,8 @@ providers:
     api_key_env: GEMINI_API_KEY
     model_id: gemini-2.5-flash
     max_context: 1000000
+    timeout:
+      read: 90.0   # large-context requests can legitimately take longer to generate
 
   - name: groq-llama
     tier: 2
@@ -12,6 +14,8 @@ providers:
     api_key_env: GROQ_API_KEY
     model_id: llama-3.3-70b-versatile
     max_context: 128000
+    timeout:
+      read: 45.0
 
   - name: openrouter-fallback
     tier: 3
@@ -19,3 +23,5 @@ providers:
     api_key_env: OPENROUTER_API_KEY
     model_id: meta-llama/llama-3.1-8b-instruct:free
     max_context: 32000
+    timeout:
+      read: 20.0   # fail fast on the free-tier fallback rather than hang
