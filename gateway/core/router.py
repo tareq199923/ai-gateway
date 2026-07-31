@@ -15,7 +15,7 @@ class UpstreamClientError(Exception):
         super().__init__(str(body))
 
 class Router:
-    def __init__(self, config_path=None):
+    def __init__(self, config_path=None, transport=None):
         if config_path is None:
             # Resolve providers.yaml relative to this file's location
             base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -40,7 +40,7 @@ class Router:
                     f"{provider['api_key_env']}. It will be unavailable."
                 )
         self.health_tracker = HealthTracker()
-        self.client = httpx.AsyncClient()
+        self.client = httpx.AsyncClient(transport=transport)
 
     async def route_request(self, messages: list) -> dict:
         for provider in self.providers:
