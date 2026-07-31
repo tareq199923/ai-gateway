@@ -7,6 +7,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Request, HTTPException
 from gateway.endpoints.openai_compat import router as openai_router
+from gateway.endpoints.mcp import router as mcp_router, require_mcp_auth
 from gateway.core.router import Router
 from gateway.core.session_store import SessionStore
 
@@ -41,6 +42,7 @@ async def require_auth(request: Request):
         )
 
 app.include_router(openai_router, dependencies=[Depends(require_auth)])
+app.include_router(mcp_router, dependencies=[Depends(require_mcp_auth)])
 
 @app.get("/")
 def health_check():
