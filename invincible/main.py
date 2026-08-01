@@ -15,8 +15,8 @@ logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.router = Router()
-    app.state.sessions = SessionStore()
+    app.state.router = Router(config_path=os.getenv("INVINCIBLE_CONFIG_PATH"))
+    app.state.sessions = SessionStore(db_path=os.getenv("INVINCIBLE_DB_PATH"))
     await app.state.sessions.init()
     yield
     await app.state.router.close()

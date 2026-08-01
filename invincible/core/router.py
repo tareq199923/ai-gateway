@@ -1,4 +1,5 @@
 # invincible/core/router.py
+import importlib.resources
 import os
 import json
 import httpx
@@ -9,6 +10,56 @@ from invincible.core.provider_health import HealthTracker
 logger = logging.getLogger("invincible.router")
 
 DEFAULT_TIMEOUT_CONFIG = {"connect": 5.0, "read": 60.0, "write": 5.0, "pool": 2.0}
+
+
+def load_providers_config(config_path: str = None) -> dict:
+    """Load and validate the provider configuration as a YAML mapping.
+
+    An explicit ``config_path`` is authoritative. Otherwise the canonical
+    packaged configuration (``invincible/providers.yaml``) is loaded through
+    ``importlib.resources`` so it works identically from a Git checkout, an
+    editable install, or a wheel - never from the current working directory.
+
+    Backward compatibility: if the packaged resource cannot be read, fall
+    back to the deprecated repository-root ``providers.yaml``. The packaged
+    copy always has priority; the root copy can be removed in a future
+    release.
+
+    Raises FileNotFoundError for a missing explicit path and ValueError for
+    malformed or non-mapping YAML.
+    """
+    if config_path is None:
+        try:
+            ref = importlib.resources.files("invincible").joinpath("providers.yaml")
+            with ref.open("r", encoding="utf-8") as f:
+                raw = f.read()
+            source = str(ref)
+        except (FileNotFoundError, ModuleNotFoundError, TypeError, AttributeError) as exc:
+            legacy = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "providers.yaml",
+            )
+            logger.warning(
+                "Packaged providers.yaml unavailable (%s); using deprecated "
+                "repository-root copy at %s", exc, legacy
+            )
+            with open(legacy, "r", encoding="utf-8") as f:
+                raw = f.read()
+            source = legacy
+    else:
+        source = os.path.abspath(config_path)
+        if not os.path.isfile(source):
+            raise FileNotFoundError(f"Provider configuration not found: {source}")
+        with open(source, "r", encoding="utf-8") as f:
+            raw = f.read()
+
+    try:
+        config = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Malformed provider configuration in {source}: {exc}") from exc
+    if not isinstance(config, dict):
+        raise ValueError(f"Provider configuration in {source} must be a YAML mapping")
+    return config
 
 
 def resolve_timeout(provider: dict) -> httpx.Timeout:
@@ -89,13 +140,7 @@ class UpstreamClientError(Exception):
 
 class Router:
     def __init__(self, config_path=None, transport=None):
-        if config_path is None:
-            # Resolve providers.yaml relative to this file's location
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-            config_path = os.path.join(base_dir, "providers.yaml")
-            
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
+        config = load_providers_config(config_path)
         self.providers = config.get("providers", [])
         required_fields = {"name", "tier", "base_url", "api_key_env", "model_id"}
         for provider in self.providers:

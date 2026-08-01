@@ -4,9 +4,18 @@ import os
 import time
 import aiosqlite
 
-DEFAULT_DB_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "sessions.db"
-)
+
+def default_db_path() -> str:
+    """Pick the session database location.
+
+    Priority: explicit ``db_path`` argument (handled by the caller), then
+    the INVINCIBLE_DB_PATH environment variable, then ``sessions.db`` in the
+    current working directory. Never resolves inside the installed package.
+    """
+    env = os.getenv("INVINCIBLE_DB_PATH")
+    if env:
+        return env
+    return os.path.join(os.getcwd(), "sessions.db")
 
 
 class SessionStore:
@@ -17,7 +26,7 @@ class SessionStore:
     """
 
     def __init__(self, db_path: str = None):
-        self.db_path = db_path or DEFAULT_DB_PATH
+        self.db_path = db_path or default_db_path()
         self._db: aiosqlite.Connection | None = None
 
     async def init(self):

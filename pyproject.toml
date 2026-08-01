@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "invincible-ai"
+dynamic = ["version"]
+description = "Multi-provider AI gateway with session memory and MCP tool execution"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "PyYAML",
+    "python-dotenv",
+    "aiosqlite",
+    "click",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "build",
+]
+
+[project.scripts]
+invincible = "invincible.cli:cli"
+inv = "invincible.cli:cli"
+
+[tool.setuptools.dynamic]
+version = { attr = "invincible.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["invincible*"]
+
+[tool.setuptools.package-data]
+invincible = ["providers.yaml"]

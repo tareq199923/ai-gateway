@@ -1,8 +1,10 @@
-# DEPRECATED: the canonical copy of this configuration lives at
-# invincible/providers.yaml and is loaded via importlib.resources.
-# This repository-root copy is kept only for backward compatibility and is
-# used solely as a fallback if the packaged resource is unavailable.
-# It can be removed in a future release.
+# Canonical provider configuration for Invincible.
+# Packaged as package data and loaded via importlib.resources, so it works
+# identically from a Git checkout, an editable install, or a wheel.
+# A deprecated compatibility copy exists at the repository root
+# (providers.yaml); it is used only as a last-resort fallback and can be
+# removed in a future release. Do not edit the root copy expecting it to
+# take effect - this file is authoritative.
 providers:
   - name: gemini-flash
     tier: 1
