@@ -108,6 +108,19 @@ WRITE_DENYLIST_PATTERNS = [
     (re.compile(r"^\.git/", re.I), "git internals"),
 ]
 
+# Narrower than WRITE_DENYLIST_PATTERNS on purpose: gateway/ and tests/ are
+# blocked from being overwritten, but reading them is the entire point of
+# giving a cloud AI a read_file tool - it needs to see the code before it
+# can usefully write or run anything. providers.yaml only holds api_key_env
+# *names*, not actual key values, so it's not a secret either. This list is
+# only things that would leak an actual credential or sensitive local state
+# if their contents were read out over the tunnel.
+READ_DENYLIST_PATTERNS = [
+    (re.compile(r"^\.env(\..+)?$", re.I), "the gateway's .env file"),
+    (re.compile(r"^sessions\.db$", re.I), "the session database"),
+    (re.compile(r"^\.git/", re.I), "git internals"),
+]
+
 
 class ToolBlocked(Exception):
     """Command or write target matched a denylist; never reached confirmation."""
@@ -127,22 +140,30 @@ def check_denylist(command: str) -> None:
             raise ToolBlocked(reason)
 
 
-def check_write_denylist(path: str) -> None:
-    """Block writes to files this project depends on for its own security
-    or state. Only applies to paths that resolve *inside* the repo root -
-    a write outside the repo entirely is a different risk profile and is
-    left to the confirmation step, same as any other write."""
+def _check_protected_path(path: str, patterns: list, verb: str) -> None:
     abs_path = os.path.abspath(path)
     try:
         rel = os.path.relpath(abs_path, _REPO_ROOT)
     except ValueError:
         return  # different drive on Windows - can't be inside the repo root
     if rel.startswith(".."):
-        return  # outside the repo root - confirmation is the gate here
+        return  # outside the repo root - confirmation (for writes) is the gate here
     rel = rel.replace(os.sep, "/")
-    for pattern, reason in WRITE_DENYLIST_PATTERNS:
+    for pattern, reason in patterns:
         if pattern.match(rel):
-            raise ToolBlocked(f"write to {reason} ({rel})")
+            raise ToolBlocked(f"{verb} of {reason} ({rel})")
+
+
+def check_read_denylist(path: str) -> None:
+    _check_protected_path(path, READ_DENYLIST_PATTERNS, "read")
+
+
+def check_write_denylist(path: str) -> None:
+    """Block writes to files this project depends on for its own security
+    or state. Only applies to paths that resolve *inside* the repo root -
+    a write outside the repo entirely is a different risk profile and is
+    left to the confirmation step, same as any other write."""
+    _check_protected_path(path, WRITE_DENYLIST_PATTERNS, "write")
 
 
 async def confirm(prompt: str) -> bool:
@@ -207,4 +228,25 @@ async def write_file(path: str, content: str) -> dict:
         return {"status": "written", "path": path, "bytes": len(content)}
     except Exception as e:
         logger.error(f"write_file failed: {e}")
+        return {"status": "error", "error": str(e)}
+
+
+async def read_file(path: str) -> dict:
+    """No confirmation prompt - reading isn't destructive, so the friction
+    wouldn't buy anything. The denylist is the only gate: it blocks reading
+    out actual secrets/state (.env, sessions.db, .git/) but deliberately
+    allows reading gateway/ and tests/ and providers.yaml, since letting the
+    cloud AI see the code is the entire point of this tool."""
+    check_read_denylist(path)  # raises ToolBlocked; caller maps it to a response
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        return {"status": "read", "path": path, "content": content}
+    except FileNotFoundError:
+        return {"status": "error", "error": f"File not found: {path}"}
+    except IsADirectoryError:
+        return {"status": "error", "error": f"Path is a directory, not a file: {path}"}
+    except Exception as e:
+        logger.error(f"read_file failed: {e}")
         return {"status": "error", "error": str(e)}

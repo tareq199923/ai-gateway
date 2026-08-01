@@ -131,6 +131,62 @@ def test_write_denylist_blocks_protected_repo_paths(relative_path):
         tool_executor.check_write_denylist(target)
 
 
+# --- read_file denylist (narrower than write_file's) ---
+
+READ_PROTECTED_RELATIVE_PATHS = [
+    ".env",
+    ".env.local",
+    "sessions.db",
+    os.path.join(".git", "config"),
+]
+
+READ_ALLOWED_RELATIVE_PATHS = [
+    "providers.yaml",
+    os.path.join("gateway", "main.py"),
+    os.path.join("gateway", "core", "router.py"),
+    os.path.join("tests", "test_api.py"),
+]
+
+
+@pytest.mark.parametrize("relative_path", READ_PROTECTED_RELATIVE_PATHS)
+def test_read_denylist_blocks_secret_files(relative_path):
+    target = os.path.join(tool_executor._REPO_ROOT, relative_path)
+    with pytest.raises(tool_executor.ToolBlocked):
+        tool_executor.check_read_denylist(target)
+
+
+@pytest.mark.parametrize("relative_path", READ_ALLOWED_RELATIVE_PATHS)
+def test_read_denylist_allows_source_and_config(relative_path):
+    target = os.path.join(tool_executor._REPO_ROOT, relative_path)
+    tool_executor.check_read_denylist(target)  # should not raise
+
+
+async def test_read_file_returns_content(tmp_path):
+    target = tmp_path / "hello.txt"
+    target.write_text("hello world")
+
+    result = await tool_executor.read_file(str(target))
+
+    assert result["status"] == "read"
+    assert result["content"] == "hello world"
+
+
+async def test_read_file_missing_returns_error(tmp_path):
+    target = tmp_path / "does_not_exist.txt"
+
+    result = await tool_executor.read_file(str(target))
+
+    assert result["status"] == "error"
+    assert "not found" in result["error"].lower()
+
+
+async def test_read_file_protected_path_raises_without_touching_disk():
+    target = os.path.join(tool_executor._REPO_ROOT, ".env")
+
+    with pytest.raises(tool_executor.ToolBlocked):
+        await tool_executor.read_file(target)
+
+
 def test_write_denylist_allows_paths_outside_repo(tmp_path):
     tool_executor.check_write_denylist(str(tmp_path / "scratch.txt"))  # should not raise
 

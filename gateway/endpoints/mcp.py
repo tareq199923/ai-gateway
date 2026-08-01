@@ -23,6 +23,20 @@ router = APIRouter()
 
 TOOLS = [
     {
+        "name": "read_file",
+        "description": (
+            "Read a file's contents from the host machine. Reads of files "
+            "that contain secrets or sensitive state (.env, sessions.db, "
+            ".git/) are rejected outright. No confirmation is required for "
+            "other files since reading is non-destructive."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+    {
         "name": "execute_bash",
         "description": (
             "Run a shell command on the host machine. Commands matching the "
@@ -105,6 +119,10 @@ async def _dispatch(method, rpc_id, params):
         args = params.get("arguments") or {}
 
         try:
+            if name == "read_file":
+                result = await tool_executor.read_file(args.get("path", ""))
+                return _result(rpc_id, _tool_content(str(result)))
+
             if name == "execute_bash":
                 result = await tool_executor.execute_bash(args.get("command", ""))
                 return _result(rpc_id, _tool_content(str(result)))

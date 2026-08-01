@@ -6,4 +6,5 @@ __pycache__/
 .DS_Store
 body.json
 sessions.db
+.review_diff_tmp.txt
 
