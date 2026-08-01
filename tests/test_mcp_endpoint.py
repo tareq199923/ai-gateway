@@ -1,6 +1,6 @@
 import os
 
-from gateway.core import tool_executor
+from invincible.core import tool_executor
 
 MCP_AUTH = {"X-MCP-Secret": "test-mcp-secret"}
 
@@ -154,7 +154,7 @@ async def test_mcp_call_read_gateway_source_allowed(client, monkeypatch):
     """Unlike write_file, read_file must allow gateway/ and tests/ - seeing
     the code is the entire point of giving a cloud AI this tool."""
     monkeypatch.setenv("MCP_SHARED_SECRET", "test-mcp-secret")
-    target = os.path.join(tool_executor._REPO_ROOT, "gateway", "main.py")
+    target = os.path.join(tool_executor._REPO_ROOT, "invincible", "main.py")
 
     response = await client.post(
         "/mcp",

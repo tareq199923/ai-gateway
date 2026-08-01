@@ -1,15 +1,15 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-# gateway/main.py
+# invincible/main.py
 import os
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Request, HTTPException
-from gateway.endpoints.openai_compat import router as openai_router
-from gateway.endpoints.mcp import router as mcp_router, require_mcp_auth
-from gateway.core.router import Router
-from gateway.core.session_store import SessionStore
+from invincible.endpoints.openai_compat import router as openai_router
+from invincible.endpoints.mcp import router as mcp_router, require_mcp_auth
+from invincible.core.router import Router
+from invincible.core.session_store import SessionStore
 
 logging.basicConfig(level=logging.INFO)
 
@@ -22,7 +22,7 @@ async def lifespan(app: FastAPI):
     await app.state.router.close()
     await app.state.sessions.close()
 
-app = FastAPI(title="AI Continuity Gateway", lifespan=lifespan)
+app = FastAPI(title="Invincible", lifespan=lifespan)
 
 async def require_auth(request: Request):
     gateway_key = os.getenv("GATEWAY_API_KEY")

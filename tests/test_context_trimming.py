@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from gateway.core.router import trim_messages, group_into_turns, estimate_tokens
+from invincible.core.router import trim_messages, group_into_turns, estimate_tokens
 from tests.conftest import provider_body
 
 

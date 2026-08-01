@@ -1,12 +1,12 @@
-# gateway/core/router.py
+# invincible/core/router.py
 import os
 import json
 import httpx
 import yaml
 import logging
-from gateway.core.provider_health import HealthTracker
+from invincible.core.provider_health import HealthTracker
 
-logger = logging.getLogger("gateway.router")
+logger = logging.getLogger("invincible.router")
 
 DEFAULT_TIMEOUT_CONFIG = {"connect": 5.0, "read": 60.0, "write": 5.0, "pool": 2.0}
 

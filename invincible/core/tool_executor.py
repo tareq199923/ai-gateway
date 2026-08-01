@@ -1,4 +1,4 @@
-# gateway/core/tool_executor.py
+# invincible/core/tool_executor.py
 """Execution layer for MCP tools (execute_bash, write_file).
 
 Security model - decided explicitly up front, not bolted on after the fact:
@@ -10,7 +10,7 @@ Security model - decided explicitly up front, not bolted on after the fact:
   2. write_file additionally has its own path denylist: even an otherwise
      harmless-looking write is blocked outright if its target is a file
      this project depends on for its own security or state (`.env`,
-     `providers.yaml`, `sessions.db`, the gateway's own source, its tests,
+     `providers.yaml`, `sessions.db`, Invincible's own source, its tests,
      or `.git/`). Confirmation is a good backstop, but it shouldn't be the
      only thing standing between a cloud AI and this server rewriting its
      own auth check.
@@ -39,7 +39,7 @@ import os
 import re
 import subprocess
 
-logger = logging.getLogger("gateway.tool_executor")
+logger = logging.getLogger("invincible.tool_executor")
 
 # Matched against the full command string, case-insensitive. Each entry is
 # (compiled pattern, human-readable reason) so a block can explain itself
@@ -93,22 +93,22 @@ DENYLIST_PATTERNS = [
 # Paths (relative to the repo root) that write_file refuses to touch
 # outright, regardless of confirmation. Repo root is resolved the same way
 # Router resolves providers.yaml (three dirname() calls up from this file:
-# gateway/core/tool_executor.py -> gateway/core -> gateway -> repo root).
+# invincible/core/tool_executor.py -> invincible/core -> invincible -> repo root).
 #
 # Case-insensitive on purpose: Windows filesystems treat .env and .ENV as
 # the same file, so a differently-cased target must not slip past.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 WRITE_DENYLIST_PATTERNS = [
-    (re.compile(r"^\.env(\..+)?$", re.I), "the gateway's .env file"),
+    (re.compile(r"^\.env(\..+)?$", re.I), "Invincible's .env file"),
     (re.compile(r"^providers\.yaml$", re.I), "provider configuration"),
     (re.compile(r"^sessions\.db$", re.I), "the session database"),
-    (re.compile(r"^gateway/", re.I), "the gateway's own source code"),
+    (re.compile(r"^invincible/", re.I), "Invincible's own source code"),
     (re.compile(r"^tests/", re.I), "the test suite"),
     (re.compile(r"^\.git/", re.I), "git internals"),
 ]
 
-# Narrower than WRITE_DENYLIST_PATTERNS on purpose: gateway/ and tests/ are
+# Narrower than WRITE_DENYLIST_PATTERNS on purpose: invincible/ and tests/ are
 # blocked from being overwritten, but reading them is the entire point of
 # giving a cloud AI a read_file tool - it needs to see the code before it
 # can usefully write or run anything. providers.yaml only holds api_key_env
@@ -116,7 +116,7 @@ WRITE_DENYLIST_PATTERNS = [
 # only things that would leak an actual credential or sensitive local state
 # if their contents were read out over the tunnel.
 READ_DENYLIST_PATTERNS = [
-    (re.compile(r"^\.env(\..+)?$", re.I), "the gateway's .env file"),
+    (re.compile(r"^\.env(\..+)?$", re.I), "Invincible's .env file"),
     (re.compile(r"^sessions\.db$", re.I), "the session database"),
     (re.compile(r"^\.git/", re.I), "git internals"),
 ]
@@ -235,7 +235,7 @@ async def read_file(path: str) -> dict:
     """No confirmation prompt - reading isn't destructive, so the friction
     wouldn't buy anything. The denylist is the only gate: it blocks reading
     out actual secrets/state (.env, sessions.db, .git/) but deliberately
-    allows reading gateway/ and tests/ and providers.yaml, since letting the
+    allows reading invincible/ and tests/ and providers.yaml, since letting the
     cloud AI see the code is the entire point of this tool."""
     check_read_denylist(path)  # raises ToolBlocked; caller maps it to a response
 

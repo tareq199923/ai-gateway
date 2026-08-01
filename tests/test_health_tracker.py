@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from gateway.core.provider_health import HealthTracker
+from invincible.core.provider_health import HealthTracker
 
 
 @pytest.fixture

@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from gateway.core.router import UpstreamClientError
+from invincible.core.router import UpstreamClientError
 from tests.conftest import default_providers, provider_body
 
 MESSAGES = [{"role": "user", "content": "hi"}]

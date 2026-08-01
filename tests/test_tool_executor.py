@@ -1,7 +1,7 @@
 import os
 import pytest
 
-from gateway.core import tool_executor
+from invincible.core import tool_executor
 
 
 DANGEROUS_COMMANDS = [
@@ -117,8 +117,8 @@ PROTECTED_RELATIVE_PATHS = [
     ".env.local",
     "providers.yaml",
     "sessions.db",
-    os.path.join("gateway", "main.py"),
-    os.path.join("gateway", "core", "router.py"),
+    os.path.join("invincible", "main.py"),
+    os.path.join("invincible", "core", "router.py"),
     os.path.join("tests", "test_api.py"),
     os.path.join(".git", "config"),
 ]
@@ -142,8 +142,8 @@ READ_PROTECTED_RELATIVE_PATHS = [
 
 READ_ALLOWED_RELATIVE_PATHS = [
     "providers.yaml",
-    os.path.join("gateway", "main.py"),
-    os.path.join("gateway", "core", "router.py"),
+    os.path.join("invincible", "main.py"),
+    os.path.join("invincible", "core", "router.py"),
     os.path.join("tests", "test_api.py"),
 ]
 

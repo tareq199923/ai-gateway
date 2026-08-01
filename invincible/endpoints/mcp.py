@@ -1,10 +1,10 @@
-# gateway/endpoints/mcp.py
+# invincible/endpoints/mcp.py
 """Minimal MCP (Model Context Protocol) tool server.
 
 Exposed over HTTP so a cloud-hosted AI reaching this machine through a
 tunnel can call execute_bash and write_file. Speaks the JSON-RPC 2.0 shape
 MCP clients expect for initialize / tools/list / tools/call - just enough
-surface for this gateway's own use, not a general-purpose transport.
+surface for this server's own use, not a general-purpose transport.
 
 Auth is a separate MCP_SHARED_SECRET, independent of GATEWAY_API_KEY, so a
 leaked tunnel URL alone isn't enough to reach these tools - and so rotating
@@ -17,7 +17,7 @@ import os
 import secrets
 from fastapi import APIRouter, Request, HTTPException, Response
 from fastapi.responses import JSONResponse
-from gateway.core import tool_executor
+from invincible.core import tool_executor
 
 router = APIRouter()
 
@@ -55,7 +55,7 @@ TOOLS = [
         "name": "write_file",
         "description": (
             "Write content to a file on the host machine. Writes to files "
-            "the gateway depends on for its own security or state (.env, "
+            "this server depends on for its own security or state (.env, "
             "providers.yaml, sessions.db, its own source/tests, .git/) are "
             "rejected outright. Everything else blocks and requires the "
             "operator to approve it interactively at the terminal running "
@@ -107,7 +107,7 @@ async def _dispatch(method, rpc_id, params):
     if method == "initialize":
         return _result(rpc_id, {
             "protocolVersion": "2025-06-18",
-            "serverInfo": {"name": "ai-gateway-mcp", "version": "0.1.0"},
+            "serverInfo": {"name": "invincible-mcp", "version": "0.1.0"},
             "capabilities": {"tools": {}},
         })
 

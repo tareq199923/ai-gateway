@@ -2,9 +2,9 @@ import httpx
 import pytest
 import yaml
 
-from gateway.core.router import Router
-from gateway.core.session_store import SessionStore
-from gateway.main import app
+from invincible.core.router import Router
+from invincible.core.session_store import SessionStore
+from invincible.main import app
 
 
 def default_providers():
