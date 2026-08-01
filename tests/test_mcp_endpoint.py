@@ -150,8 +150,8 @@ async def test_mcp_call_read_env_file_blocked(client, monkeypatch):
     assert "Blocked" in body["result"]["content"][0]["text"]
 
 
-async def test_mcp_call_read_gateway_source_allowed(client, monkeypatch):
-    """Unlike write_file, read_file must allow gateway/ and tests/ - seeing
+async def test_mcp_call_read_own_source_allowed(client, monkeypatch):
+    """Unlike write_file, read_file must allow invincible/ and tests/ - seeing
     the code is the entire point of giving a cloud AI this tool."""
     monkeypatch.setenv("MCP_SHARED_SECRET", "test-mcp-secret")
     target = os.path.join(tool_executor._REPO_ROOT, "invincible", "main.py")
