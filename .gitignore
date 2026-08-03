@@ -14,5 +14,6 @@ build/
 *.egg-info/
 .venv-package-test/
 .pytest_cache/
+.ruff_cache/
 .verify/
 

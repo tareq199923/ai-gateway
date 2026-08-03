@@ -1,8 +1,12 @@
 import httpx
 import pytest
 
-from invincible.core.router import trim_messages, group_into_turns, estimate_tokens
-from tests.conftest import provider_body
+from invincible.core.router import (
+    AllProvidersFailedError,
+    estimate_tokens,
+    group_into_turns,
+    trim_messages,
+)
 
 
 def user(content):
@@ -41,9 +45,19 @@ def test_trim_never_splits_a_tool_call_from_its_tool_result():
     tool_call_msg = {
         "role": "assistant",
         "content": None,
-        "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}],
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": "{}"},
+            }
+        ],
     }
-    tool_result_msg = {"role": "tool", "tool_call_id": "call_1", "content": "file contents here"}
+    tool_result_msg = {
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "content": "file contents here",
+    }
 
     messages = [
         system("be helpful"),
@@ -121,7 +135,7 @@ async def test_router_trims_to_each_providers_own_max_context(make_router):
         },
     )
 
-    with pytest.raises(Exception):
+    with pytest.raises(AllProvidersFailedError):
         await router.route_request(big_history)
 
     import json

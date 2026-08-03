@@ -1,15 +1,17 @@
-from dotenv import load_dotenv
-load_dotenv()
-
-# invincible/main.py
-import os
 import logging
+import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, Request, HTTPException
-from invincible.endpoints.openai_compat import router as openai_router
-from invincible.endpoints.mcp import router as mcp_router, require_mcp_auth
+
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException, Request
+
 from invincible.core.router import Router
 from invincible.core.session_store import SessionStore
+from invincible.endpoints.mcp import require_mcp_auth
+from invincible.endpoints.mcp import router as mcp_router
+from invincible.endpoints.openai_compat import router as openai_router
+
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 
@@ -32,13 +34,23 @@ async def require_auth(request: Request):
     if not auth or not auth.startswith("Bearer "):
         raise HTTPException(
             status_code=401,
-            detail={"error": {"message": "Missing authentication token", "type": "auth_error"}},
+            detail={
+                "error": {
+                    "message": "Missing authentication token",
+                    "type": "auth_error",
+                }
+            },
         )
     token = auth.removeprefix("Bearer ")
     if token != gateway_key:
         raise HTTPException(
             status_code=401,
-            detail={"error": {"message": "Invalid authentication token", "type": "auth_error"}},
+            detail={
+                "error": {
+                    "message": "Invalid authentication token",
+                    "type": "auth_error",
+                }
+            },
         )
 
 app.include_router(openai_router, dependencies=[Depends(require_auth)])

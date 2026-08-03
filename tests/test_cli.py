@@ -77,7 +77,9 @@ def test_setup_creates_env_file(tmp_path):
 
 def test_setup_generates_gateway_and_mcp_secrets_without_printing(tmp_path):
     target = tmp_path / ".env"
-    result = CliRunner().invoke(cli, ["setup", "--env-file", str(target)], input="\n\n\n")
+    result = CliRunner().invoke(
+        cli, ["setup", "--env-file", str(target)], input="\n\n\n"
+    )
     assert result.exit_code == 0
     values = _env_dict(target.read_text(encoding="utf-8"))
     assert values["GATEWAY_API_KEY"]
@@ -143,7 +145,9 @@ def test_setup_preserves_unicode_comments_and_values(tmp_path):
 
 def test_setup_repeated_runs_do_not_duplicate_keys(tmp_path):
     target = tmp_path / ".env"
-    first = CliRunner().invoke(cli, ["setup", "--env-file", str(target)], input="k1\nk2\nk3\n")
+    first = CliRunner().invoke(
+        cli, ["setup", "--env-file", str(target)], input="k1\nk2\nk3\n"
+    )
     assert first.exit_code == 0
     second = CliRunner().invoke(cli, ["setup", "--env-file", str(target)], input="")
     assert second.exit_code == 0
@@ -189,7 +193,9 @@ def test_setup_force_empty_input_preserves_existing(tmp_path):
 
 def test_setup_write_failure_returns_nonzero(tmp_path):
     target = tmp_path / "missing-dir" / ".env"
-    result = CliRunner().invoke(cli, ["setup", "--env-file", str(target)], input="k1\nk2\nk3\n")
+    result = CliRunner().invoke(
+        cli, ["setup", "--env-file", str(target)], input="k1\nk2\nk3\n"
+    )
     assert result.exit_code == 1
     assert "Could not write env file" in result.output
 
@@ -214,19 +220,39 @@ def test_start_invokes_uvicorn_run_with_defaults(monkeypatch, tmp_path):
     assert len(calls) == 1
     args, kwargs = calls[0]
     assert args[0] == "invincible.main:app"
-    assert kwargs == {"host": "127.0.0.1", "port": 8000, "reload": False, "log_level": "info"}
+    assert kwargs == {
+        "host": "127.0.0.1",
+        "port": 8000,
+        "reload": False,
+        "log_level": "info",
+    }
 
 
 def test_start_passes_custom_options(monkeypatch, tmp_path):
     calls = _fake_run(monkeypatch)
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
-        cli, ["start", "--host", "0.0.0.0", "--port", "8080", "--reload", "--log-level", "debug"]
+        cli,
+        [
+            "start",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "8080",
+            "--reload",
+            "--log-level",
+            "debug",
+        ],
     )
     assert result.exit_code == 0
     args, kwargs = calls[0]
     assert args[0] == "invincible.main:app"
-    assert kwargs == {"host": "0.0.0.0", "port": 8080, "reload": True, "log_level": "debug"}
+    assert kwargs == {
+        "host": "0.0.0.0",
+        "port": 8080,
+        "reload": True,
+        "log_level": "debug",
+    }
 
 
 @pytest.mark.parametrize("port", ["0", "-1", "70000"])

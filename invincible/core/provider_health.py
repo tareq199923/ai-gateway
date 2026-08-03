@@ -1,5 +1,6 @@
 import time
 
+
 class ProviderHealth:
     def __init__(self):
         self.consecutive_failures = 0
@@ -38,6 +39,4 @@ class HealthTracker:
         health = self.get(provider_name)
         if health.cooldown_until is None:
             return True
-        if time.monotonic() > health.cooldown_until:
-            return True
-        return False
+        return time.monotonic() > health.cooldown_until

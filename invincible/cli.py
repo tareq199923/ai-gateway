@@ -74,10 +74,11 @@ def setup(env_file, force):
     lines = []
     if os.path.isfile(env_path):
         try:
-            with open(env_path, "r", encoding="utf-8") as f:
+            with open(env_path, encoding="utf-8") as f:
                 content = f.read()
         except OSError as exc:
-            raise click.ClickException(f"Could not read env file {env_path}: {exc}")
+            msg = f"Could not read env file {env_path}: {exc}"
+            raise click.ClickException(msg) from exc
         lines = content.splitlines(keepends=True)
         for line in lines:
             parsed = _parse_env_line(line)
@@ -143,7 +144,8 @@ def setup(env_file, force):
         with open(env_path, "w", encoding="utf-8") as f:
             f.write(text)
     except OSError as exc:
-        raise click.ClickException(f"Could not write env file {env_path}: {exc}")
+        msg = f"Could not write env file {env_path}: {exc}"
+        raise click.ClickException(msg) from exc
 
     click.echo(f"Configured {env_path}")
 
@@ -182,7 +184,7 @@ def start(host, port, reload, log_level, env_file, config_path, db_path):
         try:
             load_providers_config(config_abs)
         except (OSError, ValueError) as exc:
-            raise click.ClickException(str(exc))
+            raise click.ClickException(str(exc)) from exc
         os.environ["INVINCIBLE_CONFIG_PATH"] = config_abs
 
     if db_path:

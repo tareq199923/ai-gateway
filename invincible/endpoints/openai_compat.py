@@ -1,9 +1,12 @@
 # invincible/endpoints/openai_compat.py
 from typing import Any
-from pydantic import BaseModel
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
 from invincible.core.router import UpstreamClientError
+
 
 class ChatRequest(BaseModel):
     messages: list[dict[str, Any]]
@@ -15,10 +18,18 @@ router = APIRouter()
 async def chat_completions(request: Request, body: ChatRequest):
     if body.stream:
         return JSONResponse(
-            content={"error": {"message": "Streaming is not currently supported by this server.", "type": "invalid_request_error"}},
+            content={
+                "error": {
+                    "message": (
+                        "Streaming is not currently supported by "
+                        "this server."
+                    ),
+                    "type": "invalid_request_error",
+                }
+            },
             status_code=400
         )
-    
+
     session_id = request.headers.get("X-Session-Id", "default")
     store = request.app.state.sessions
 

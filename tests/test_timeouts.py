@@ -1,4 +1,4 @@
-from invincible.core.router import resolve_timeout, DEFAULT_TIMEOUT_CONFIG
+from invincible.core.router import DEFAULT_TIMEOUT_CONFIG, resolve_timeout
 
 
 def test_provider_without_timeout_block_uses_defaults():
@@ -32,7 +32,8 @@ def test_provider_with_full_timeout_override():
 
 
 def test_real_providers_yaml_parses_with_timeout_overrides():
-    """Guards against a YAML typo breaking the actual providers.yaml shipped in this repo."""
+    """Guards against a YAML typo breaking the actual providers.yaml
+    shipped in this repo."""
     from invincible.core.router import Router
 
     router = Router()

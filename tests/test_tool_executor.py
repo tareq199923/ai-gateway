@@ -1,8 +1,8 @@
 import os
+
 import pytest
 
 from invincible.core import tool_executor
-
 
 DANGEROUS_COMMANDS = [
     # Unix
@@ -199,7 +199,9 @@ async def test_read_file_protected_path_raises_without_touching_disk():
 
 
 def test_write_denylist_allows_paths_outside_repo(tmp_path):
-    tool_executor.check_write_denylist(str(tmp_path / "scratch.txt"))  # should not raise
+    tool_executor.check_write_denylist(
+        str(tmp_path / "scratch.txt")
+    )  # should not raise
 
 
 async def test_write_file_to_protected_path_never_prompts(monkeypatch):

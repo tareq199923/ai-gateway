@@ -29,7 +29,9 @@ async def test_session_history_is_replayed_on_second_request(router_setter, clie
 
     def alpha_handler(request: httpx.Request):
         received_payloads.append(request.read())
-        return httpx.Response(200, json=provider_body("alpha", content="Nice to meet you!"))
+        return httpx.Response(
+            200, json=provider_body("alpha", content="Nice to meet you!")
+        )
 
     router_setter({"alpha.example.com": alpha_handler})
 
@@ -70,7 +72,10 @@ async def test_different_session_ids_do_not_share_history(router_setter, client)
 
     await client.post(
         "/v1/chat/completions",
-        headers={"Authorization": "Bearer test-gateway-key", "X-Session-Id": "session-a"},
+        headers={
+            "Authorization": "Bearer test-gateway-key",
+            "X-Session-Id": "session-a",
+        },
         json={"messages": [{"role": "user", "content": "secret: banana"}]},
     )
 
@@ -84,7 +89,10 @@ async def test_different_session_ids_do_not_share_history(router_setter, client)
 
     await client.post(
         "/v1/chat/completions",
-        headers={"Authorization": "Bearer test-gateway-key", "X-Session-Id": "session-b"},
+        headers={
+            "Authorization": "Bearer test-gateway-key",
+            "X-Session-Id": "session-b",
+        },
         json={"messages": [{"role": "user", "content": "what is the secret?"}]},
     )
 

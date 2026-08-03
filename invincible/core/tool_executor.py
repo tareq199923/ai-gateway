@@ -97,7 +97,9 @@ DENYLIST_PATTERNS = [
 #
 # Case-insensitive on purpose: Windows filesystems treat .env and .ENV as
 # the same file, so a differently-cased target must not slip past.
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_REPO_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 
 WRITE_DENYLIST_PATTERNS = [
     (re.compile(r"^\.env(\..+)?$", re.I), "Invincible's .env file"),
@@ -200,7 +202,11 @@ async def execute_bash(command: str, timeout: float = 30.0) -> dict:
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            return {"stdout": "", "stderr": f"Command timed out after {timeout}s", "returncode": -1}
+            return {
+                "stdout": "",
+                "stderr": f"Command timed out after {timeout}s",
+                "returncode": -1,
+            }
 
         return {
             "stdout": stdout.decode(errors="replace"),
@@ -240,7 +246,7 @@ async def read_file(path: str) -> dict:
     check_read_denylist(path)  # raises ToolBlocked; caller maps it to a response
 
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             content = f.read()
         return {"status": "read", "path": path, "content": content}
     except FileNotFoundError:

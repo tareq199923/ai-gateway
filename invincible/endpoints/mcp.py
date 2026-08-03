@@ -15,8 +15,10 @@ used to guess the secret one byte at a time.
 import json
 import os
 import secrets
-from fastapi import APIRouter, Request, HTTPException, Response
+
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
+
 from invincible.core import tool_executor
 
 router = APIRouter()
@@ -78,16 +80,26 @@ async def require_mcp_auth(request: Request):
     if not secret:
         raise HTTPException(
             status_code=503,
-            detail={"error": {
-                "message": "MCP_SHARED_SECRET is not configured; MCP endpoint is disabled.",
-                "type": "config_error",
-            }},
+            detail={
+                "error": {
+                    "message": (
+                        "MCP_SHARED_SECRET is not configured; "
+                        "MCP endpoint is disabled."
+                    ),
+                    "type": "config_error",
+                }
+            },
         )
     provided = request.headers.get("X-MCP-Secret")
     if provided is None or not secrets.compare_digest(provided, secret):
         raise HTTPException(
             status_code=401,
-            detail={"error": {"message": "Missing or invalid MCP secret", "type": "auth_error"}},
+            detail={
+                "error": {
+                    "message": "Missing or invalid MCP secret",
+                    "type": "auth_error",
+                }
+            },
         )
 
 

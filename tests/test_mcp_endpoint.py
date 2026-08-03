@@ -3,11 +3,14 @@ import os
 from invincible.core import tool_executor
 
 MCP_AUTH = {"X-MCP-Secret": "test-mcp-secret"}
+TOOLS_LIST_REQUEST = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
 
 
 async def test_mcp_missing_secret_returns_401(client, monkeypatch):
     monkeypatch.setenv("MCP_SHARED_SECRET", "test-mcp-secret")
-    response = await client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    response = await client.post(
+        "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    )
     assert response.status_code == 401
 
 
@@ -24,7 +27,9 @@ async def test_mcp_wrong_secret_returns_401(client, monkeypatch):
 async def test_mcp_disabled_when_secret_unset(client, monkeypatch):
     monkeypatch.delenv("MCP_SHARED_SECRET", raising=False)
     response = await client.post(
-        "/mcp", headers=MCP_AUTH, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        "/mcp",
+        headers=MCP_AUTH,
+        json=TOOLS_LIST_REQUEST,
     )
     assert response.status_code == 503
 
@@ -32,7 +37,9 @@ async def test_mcp_disabled_when_secret_unset(client, monkeypatch):
 async def test_mcp_tools_list(client, monkeypatch):
     monkeypatch.setenv("MCP_SHARED_SECRET", "test-mcp-secret")
     response = await client.post(
-        "/mcp", headers=MCP_AUTH, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        "/mcp",
+        headers=MCP_AUTH,
+        json=TOOLS_LIST_REQUEST,
     )
     assert response.status_code == 200
     names = {t["name"] for t in response.json()["result"]["tools"]}
@@ -48,7 +55,10 @@ async def test_mcp_call_blocked_command(client, monkeypatch):
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
-            "params": {"name": "execute_bash", "arguments": {"command": "sudo rm -rf /"}},
+            "params": {
+                "name": "execute_bash",
+                "arguments": {"command": "sudo rm -rf /"},
+            },
         },
     )
     body = response.json()

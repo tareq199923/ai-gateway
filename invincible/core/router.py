@@ -1,10 +1,12 @@
 # invincible/core/router.py
 import importlib.resources
-import os
 import json
+import logging
+import os
+
 import httpx
 import yaml
-import logging
+
 from invincible.core.provider_health import HealthTracker
 
 logger = logging.getLogger("invincible.router")
@@ -34,7 +36,12 @@ def load_providers_config(config_path: str = None) -> dict:
             with ref.open("r", encoding="utf-8") as f:
                 raw = f.read()
             source = str(ref)
-        except (FileNotFoundError, ModuleNotFoundError, TypeError, AttributeError) as exc:
+        except (
+            FileNotFoundError,
+            ModuleNotFoundError,
+            TypeError,
+            AttributeError,
+        ) as exc:
             legacy = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                 "providers.yaml",
@@ -43,20 +50,22 @@ def load_providers_config(config_path: str = None) -> dict:
                 "Packaged providers.yaml unavailable (%s); using deprecated "
                 "repository-root copy at %s", exc, legacy
             )
-            with open(legacy, "r", encoding="utf-8") as f:
+            with open(legacy, encoding="utf-8") as f:
                 raw = f.read()
             source = legacy
     else:
         source = os.path.abspath(config_path)
         if not os.path.isfile(source):
             raise FileNotFoundError(f"Provider configuration not found: {source}")
-        with open(source, "r", encoding="utf-8") as f:
+        with open(source, encoding="utf-8") as f:
             raw = f.read()
 
     try:
         config = yaml.safe_load(raw)
     except yaml.YAMLError as exc:
-        raise ValueError(f"Malformed provider configuration in {source}: {exc}") from exc
+        raise ValueError(
+            f"Malformed provider configuration in {source}: {exc}"
+        ) from exc
     if not isinstance(config, dict):
         raise ValueError(f"Provider configuration in {source} must be a YAML mapping")
     return config
@@ -100,7 +109,11 @@ def group_into_turns(messages: list) -> list:
     return turns
 
 
-def trim_messages(messages: list, max_context: int, reserve_tokens: int = RESERVE_TOKENS) -> list:
+def trim_messages(
+    messages: list,
+    max_context: int,
+    reserve_tokens: int = RESERVE_TOKENS,
+) -> list:
     """Keep all system messages, then keep as many of the most recent turns
     as fit inside max_context (minus reserve_tokens for the response).
     Always keeps at least the single most recent turn, even if it alone
@@ -166,14 +179,17 @@ class Router:
     async def route_request(self, messages: list) -> dict:
         for provider in self.providers:
             name = provider["name"]
-            
+
             if not self.health_tracker.is_available(name):
                 logger.info(f"Provider {name} in cooldown. Skipping.")
                 continue
 
             api_key = os.getenv(provider["api_key_env"])
             if not api_key:
-                logger.warning(f"No API key found for {name} ({provider['api_key_env']}). Skipping.")
+                logger.warning(
+                    f"No API key found for {name} "
+                    f"({provider['api_key_env']}). Skipping."
+                )
                 continue
 
             headers = {
@@ -195,21 +211,26 @@ class Router:
                     json=payload,
                     timeout=resolve_timeout(provider)
                 )
-                
+
                 if resp.status_code == 429 or resp.status_code >= 500:
-                    logger.warning(f"Provider {name} returned {resp.status_code}. Triggering failover.")
+                    logger.warning(
+                        f"Provider {name} returned {resp.status_code}. "
+                        "Triggering failover."
+                    )
                     self.health_tracker.record_failure(name)
                     await resp.aclose()
                     continue
-                    
+
                 resp.raise_for_status()
                 self.health_tracker.record_success(name)
                 return resp.json()
-                    
+
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
                 if status in (401, 403):
-                    logger.warning(f"Auth error from {name} ({status}). Disabling provider.")
+                    logger.warning(
+                        f"Auth error from {name} ({status}). Disabling provider."
+                    )
                     self.health_tracker.disable(name)
                     await e.response.aclose()
                     continue
@@ -219,12 +240,12 @@ class Router:
                 except json.JSONDecodeError:
                     parsed = {"raw": body.decode(errors="replace")}
                 raise UpstreamClientError(status_code=status, body=parsed) from e
-                    
+
             except httpx.RequestError as e:
                 logger.error(f"Network error with {name}: {e}. Triggering failover.")
                 self.health_tracker.record_failure(name)
                 continue
-                
+
         raise AllProvidersFailedError("All providers failed or are in cooldown.")
 
     async def close(self):
