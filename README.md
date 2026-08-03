@@ -20,7 +20,7 @@ serves two roles in one process:
    reaches your machine through a tunnel, letting it read local files, write
    code, and run commands on your box.
 
-### The two problems it solves
+### Why it exists
 
 - **The 429 problem.** AI coding agents using free/open-source providers
   (Groq, Gemini, OpenRouter) get killed when they hit a rate limit. Invincible
