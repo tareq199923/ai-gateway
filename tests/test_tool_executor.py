@@ -110,6 +110,17 @@ async def test_write_file_approved_writes_content(monkeypatch, tmp_path):
     assert target.read_text() == "hello world"
 
 
+async def test_write_file_handles_unicode_content(monkeypatch, tmp_path):
+    monkeypatch.setattr(tool_executor, "confirm", lambda prompt: _true())
+    target = tmp_path / "unicode.txt"
+    content = "héllo wörld 中文 🚀"
+
+    result = await tool_executor.write_file(str(target), content)
+
+    assert result["status"] == "written"
+    assert target.read_text(encoding="utf-8") == content
+
+
 # --- write_file path denylist ---
 
 PROTECTED_RELATIVE_PATHS = [

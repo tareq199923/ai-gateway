@@ -138,6 +138,9 @@ class UpstreamClientError(Exception):
         self.body = body
         super().__init__(str(body))
 
+class AllProvidersFailedError(Exception):
+    """Every provider failed, was disabled, or is in cooldown; nothing left to try."""
+
 class Router:
     def __init__(self, config_path=None, transport=None):
         config = load_providers_config(config_path)
@@ -196,6 +199,7 @@ class Router:
                 if resp.status_code == 429 or resp.status_code >= 500:
                     logger.warning(f"Provider {name} returned {resp.status_code}. Triggering failover.")
                     self.health_tracker.record_failure(name)
+                    await resp.aclose()
                     continue
                     
                 resp.raise_for_status()
@@ -207,6 +211,7 @@ class Router:
                 if status in (401, 403):
                     logger.warning(f"Auth error from {name} ({status}). Disabling provider.")
                     self.health_tracker.disable(name)
+                    await e.response.aclose()
                     continue
                 body = await e.response.aread()
                 try:
@@ -220,7 +225,7 @@ class Router:
                 self.health_tracker.record_failure(name)
                 continue
                 
-        raise Exception("All providers failed or are in cooldown.")
+        raise AllProvidersFailedError("All providers failed or are in cooldown.")
 
     async def close(self):
         await self.client.aclose()

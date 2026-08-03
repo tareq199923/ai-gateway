@@ -54,7 +54,12 @@ class SessionStore:
             row = await cursor.fetchone()
         if row is None:
             return []
-        return json.loads(row[0])
+        try:
+            return json.loads(row[0])
+        except (json.JSONDecodeError, TypeError):
+            # Corrupt row (manual edit, interrupted write): treat as empty
+            # rather than crashing the request.
+            return []
 
     async def save(self, session_id: str, messages: list):
         await self._db.execute(

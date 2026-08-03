@@ -1,7 +1,23 @@
 import httpx
 import pytest
 
+from invincible.core.session_store import SessionStore
 from tests.conftest import provider_body
+
+
+@pytest.mark.asyncio
+async def test_corrupt_session_row_returns_empty_history(tmp_path):
+    store = SessionStore(db_path=str(tmp_path / "sessions.db"))
+    await store.init()
+    await store._db.execute(
+        "INSERT INTO sessions (session_id, messages, updated_at) VALUES (?, ?, ?)",
+        ("broken", "not json{", 1.0),
+    )
+    await store._db.commit()
+
+    assert await store.load("broken") == []
+
+    await store.close()
 
 
 @pytest.mark.asyncio

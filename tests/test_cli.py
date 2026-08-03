@@ -126,6 +126,21 @@ def test_setup_preserves_unrelated_vars_comments_and_blank_lines(tmp_path):
     assert values["GATEWAY_API_KEY"] and values["MCP_SHARED_SECRET"]
 
 
+def test_setup_preserves_unicode_comments_and_values(tmp_path):
+    target = tmp_path / ".env"
+    target.write_text(
+        "# notes in 中文 and emoji 🚀\nCUSTOM_SETTING=café\n",
+        encoding="utf-8",
+    )
+    result = CliRunner().invoke(
+        cli, ["setup", "--env-file", str(target)], input="k1\nk2\nk3\n"
+    )
+    assert result.exit_code == 0
+    text = target.read_text(encoding="utf-8")
+    assert "# notes in 中文 and emoji 🚀" in text
+    assert "CUSTOM_SETTING=café" in text
+
+
 def test_setup_repeated_runs_do_not_duplicate_keys(tmp_path):
     target = tmp_path / ".env"
     first = CliRunner().invoke(cli, ["setup", "--env-file", str(target)], input="k1\nk2\nk3\n")

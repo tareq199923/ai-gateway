@@ -163,6 +163,12 @@ async def mcp_endpoint(request: Request):
     is_notification = "id" not in body
     rpc_id = body.get("id")
 
+    if not isinstance(method, str) or not method:
+        # JSON-RPC 2.0: a request must carry a method name.
+        if is_notification:
+            return Response(status_code=204)
+        return JSONResponse(_error(rpc_id, -32600, "Invalid Request"))
+
     if not isinstance(params, dict):
         if is_notification:
             # Notifications never get a response body, even on error.

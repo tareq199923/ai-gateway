@@ -223,7 +223,7 @@ async def write_file(path: str, content: str) -> dict:
         dirname = os.path.dirname(os.path.abspath(path))
         if dirname:
             os.makedirs(dirname, exist_ok=True)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(content)
         return {"status": "written", "path": path, "bytes": len(content)}
     except Exception as e:

@@ -7,6 +7,18 @@ from tests.conftest import default_providers, provider_body
 MESSAGES = [{"role": "user", "content": "hi"}]
 
 
+class _TrackingResponse(httpx.Response):
+    """httpx.Response subclass that records whether aclose() was awaited."""
+
+    def __init__(self, *args, **kwargs):
+        self.aclosed = False
+        super().__init__(*args, **kwargs)
+
+    async def aclose(self):
+        self.aclosed = True
+        await super().aclose()
+
+
 async def test_success_returns_lowest_tier_provider(make_router):
     alpha_body = provider_body("alpha")
     router = make_router(
@@ -62,6 +74,45 @@ async def test_failover_on_5xx(make_router):
     )
     result = await router.route_request(MESSAGES)
     assert result == provider_body("beta")
+
+
+async def test_failover_closes_unread_response_on_429(make_router):
+    responses = []
+
+    def alpha_handler(request):
+        resp = _TrackingResponse(429)
+        responses.append(resp)
+        return resp
+
+    def beta_handler(request):
+        return httpx.Response(200, json=provider_body("beta"))
+
+    router = make_router(
+        handlers={"alpha.example.com": alpha_handler, "beta.example.com": beta_handler}
+    )
+    result = await router.route_request(MESSAGES)
+    assert result == provider_body("beta")
+    assert responses[0].aclosed
+
+
+async def test_auth_failure_closes_unread_response(make_router):
+    responses = []
+
+    def alpha_handler(request):
+        resp = _TrackingResponse(401)
+        responses.append(resp)
+        return resp
+
+    def beta_handler(request):
+        return httpx.Response(200, json=provider_body("beta"))
+
+    router = make_router(
+        handlers={"alpha.example.com": alpha_handler, "beta.example.com": beta_handler}
+    )
+    result = await router.route_request(MESSAGES)
+    assert result == provider_body("beta")
+    assert not router.health_tracker.is_available("alpha")
+    assert responses[0].aclosed
 
 
 async def test_failover_on_network_error(make_router):

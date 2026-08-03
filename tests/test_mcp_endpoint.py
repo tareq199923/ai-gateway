@@ -223,6 +223,41 @@ async def test_mcp_non_object_body_returns_invalid_request(client, monkeypatch):
     assert body["error"]["code"] == -32600
 
 
+async def test_mcp_missing_method_returns_invalid_request(client, monkeypatch):
+    monkeypatch.setenv("MCP_SHARED_SECRET", "test-mcp-secret")
+    response = await client.post(
+        "/mcp",
+        headers=MCP_AUTH,
+        json={"jsonrpc": "2.0", "id": 1},
+    )
+    body = response.json()
+    assert body["id"] == 1
+    assert body["error"]["code"] == -32600
+
+
+async def test_mcp_non_string_method_returns_invalid_request(client, monkeypatch):
+    monkeypatch.setenv("MCP_SHARED_SECRET", "test-mcp-secret")
+    response = await client.post(
+        "/mcp",
+        headers=MCP_AUTH,
+        json={"jsonrpc": "2.0", "id": 1, "method": 123},
+    )
+    body = response.json()
+    assert body["id"] == 1
+    assert body["error"]["code"] == -32600
+
+
+async def test_mcp_missing_method_notification_still_no_body(client, monkeypatch):
+    monkeypatch.setenv("MCP_SHARED_SECRET", "test-mcp-secret")
+    response = await client.post(
+        "/mcp",
+        headers=MCP_AUTH,
+        json={"jsonrpc": "2.0"},  # no "id" and no method -> notification
+    )
+    assert response.status_code == 204
+    assert response.content == b""
+
+
 async def test_mcp_invalid_params_returns_invalid_params(client, monkeypatch):
     monkeypatch.setenv("MCP_SHARED_SECRET", "test-mcp-secret")
     response = await client.post(

@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 venv/
 __pycache__/
 *.pyc
@@ -11,4 +13,6 @@ dist/
 build/
 *.egg-info/
 .venv-package-test/
+.pytest_cache/
+.verify/
 
