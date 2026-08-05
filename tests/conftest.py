@@ -72,8 +72,8 @@ def make_router(provider_config, monkeypatch):
 def router_setter(make_router):
     routers = []
 
-    def _set(handlers=None):
-        routers.append(make_router(handlers=handlers))
+    def _set(handlers=None, providers=None):
+        routers.append(make_router(handlers=handlers, providers=providers))
         app.state.router = routers[-1]
         return routers[-1]
 

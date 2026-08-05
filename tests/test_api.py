@@ -1,6 +1,6 @@
 import httpx
 
-from tests.conftest import provider_body
+from tests.conftest import default_providers, provider_body
 
 MESSAGES = [{"role": "user", "content": "hi"}]
 AUTH = {"Authorization": "Bearer test-gateway-key"}
@@ -103,3 +103,51 @@ async def test_upstream_error_forwarded(client, router_setter):
     )
     assert response.status_code == 400
     assert response.json() == error_body
+
+
+async def test_models_lists_configured_models(client):
+    response = await client.get("/v1/models", headers=AUTH)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["object"] == "list"
+    assert [
+        model["id"] for model in body["data"]
+    ] == ["alpha-model", "beta-model", "gamma-model"]
+
+
+async def test_models_order_follows_router_tier_order(client, router_setter):
+    router_setter(
+        providers=list(reversed(default_providers())),
+        handlers={},
+    )
+    response = await client.get("/v1/models", headers=AUTH)
+    assert response.status_code == 200
+    assert [
+        model["id"] for model in response.json()["data"]
+    ] == ["alpha-model", "beta-model", "gamma-model"]
+
+
+async def test_models_empty_providers_returns_empty_list(client, router_setter):
+    router_setter(providers=[], handlers={})
+    response = await client.get("/v1/models", headers=AUTH)
+    assert response.status_code == 200
+    assert response.json() == {"object": "list", "data": []}
+
+
+async def test_models_matches_openai_schema(client):
+    response = await client.get("/v1/models", headers=AUTH)
+    assert response.status_code == 200
+    assert response.json() == {
+        "object": "list",
+        "data": [
+            {"id": "alpha-model", "object": "model", "owned_by": "invincible"},
+            {"id": "beta-model", "object": "model", "owned_by": "invincible"},
+            {"id": "gamma-model", "object": "model", "owned_by": "invincible"},
+        ],
+    }
+
+
+async def test_models_requires_auth(client):
+    response = await client.get("/v1/models")
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"]["type"] == "auth_error"

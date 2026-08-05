@@ -1,7 +1,7 @@
 # invincible/endpoints/openai_compat.py
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -13,6 +13,36 @@ class ChatRequest(BaseModel):
     stream: bool | None = None
 
 router = APIRouter()
+
+
+def models_from_providers(providers: list) -> list[dict]:
+    """Map the router's loaded providers to OpenAI /v1/models entries.
+
+    The router validates providers at startup, so every entry normally has
+    a ``model_id``; the isinstance/get guard is cheap defense in depth.
+    Runtime provider order is preserved.
+    """
+    return [
+        {"id": p["model_id"], "object": "model", "owned_by": "invincible"}
+        for p in providers
+        if isinstance(p, dict) and p.get("model_id")
+    ]
+
+
+@router.get("/v1/models")
+async def list_models(request: Request):
+    router = getattr(request.app.state, "router", None)
+    if router is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": "Router not initialized",
+                    "type": "config_error",
+                }
+            },
+        )
+    return {"object": "list", "data": models_from_providers(router.providers)}
 
 @router.post("/v1/chat/completions")
 async def chat_completions(request: Request, body: ChatRequest):

@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from invincible.core.router import UpstreamClientError
+from invincible.core.router import Router, UpstreamClientError
 from tests.conftest import default_providers, provider_body
 
 MESSAGES = [{"role": "user", "content": "hi"}]
@@ -231,3 +231,15 @@ def test_missing_required_field_raises(make_router):
     ]
     with pytest.raises(ValueError, match="api_key_env"):
         make_router(providers=providers, handlers={})
+
+
+def test_missing_config_file_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        Router(config_path=str(tmp_path / "does-not-exist.yaml"))
+
+
+def test_malformed_config_file_raises(tmp_path):
+    path = tmp_path / "providers.yaml"
+    path.write_text("providers: [\n  - name: unclosed\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Malformed provider configuration"):
+        Router(config_path=str(path))

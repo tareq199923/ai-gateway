@@ -143,6 +143,7 @@ Full CLI reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md) → *CLI refe
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/` | none | Health check → `{"status": "healthy"}` |
+| `GET` | `/v1/models` | `Authorization: Bearer <GATEWAY_API_KEY>` | OpenAI-compatible model list from `providers.yaml` |
 | `POST` | `/v1/chat/completions` | `Authorization: Bearer <GATEWAY_API_KEY>` | Chat completion with tiered failover |
 
 ### Chat request
@@ -232,7 +233,24 @@ curl http://127.0.0.1:8000/
 # {"status": "healthy"}
 ```
 
-### 2. Chat with session memory
+### 2. List models
+
+```bash
+curl http://127.0.0.1:8000/v1/models
+# {
+#   "object": "list",
+#   "data": [
+#     {"id": "gemini-2.5-flash", "object": "model", "owned_by": "invincible"},
+#     {"id": "llama-3.3-70b-versatile", "object": "model", "owned_by": "invincible"},
+#     {"id": "meta-llama/llama-3.1-8b-instruct:free", "object": "model", "owned_by": "invincible"}
+#   ]
+# }
+```
+
+The list is built from the running gateway's provider configuration, so it
+reflects exactly what the gateway can route to.
+
+### 3. Chat with session memory
 
 ```bash
 curl http://127.0.0.1:8000/v1/chat/completions \
@@ -246,7 +264,7 @@ The assistant reply is stored under `my-conversation` and will be included in
 your next request with the same `X-Session-Id` — the model remembers the
 conversation.
 
-### 3. List MCP tools
+### 4. List MCP tools
 
 ```bash
 curl -X POST http://127.0.0.1:8000/mcp \
@@ -255,7 +273,7 @@ curl -X POST http://127.0.0.1:8000/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-### 4. Run a command via MCP
+### 5. Run a command via MCP
 
 ```bash
 curl -X POST http://127.0.0.1:8000/mcp \
@@ -267,7 +285,7 @@ curl -X POST http://127.0.0.1:8000/mcp \
 
 Expect a `[y/N]` prompt at the server terminal before it runs.
 
-### 5. Expose to a cloud AI over a tunnel
+### 6. Expose to a cloud AI over a tunnel
 
 ```bash
 cloudflared tunnel --url http://127.0.0.1:8000
@@ -309,7 +327,7 @@ More MCP protocol details: [docs/MCP_PROTOCOL.md](docs/MCP_PROTOCOL.md).
 | Path | Role |
 |---|---|
 | `invincible/main.py` | FastAPI app, lifespan, two auth dependencies, router wiring. |
-| `invincible/endpoints/openai_compat.py` | `POST /v1/chat/completions`; session merge + upstream call. |
+| `invincible/endpoints/openai_compat.py` | `POST /v1/chat/completions` (session merge + upstream call); `GET /v1/models`. |
 | `invincible/endpoints/mcp.py` | `POST /mcp`; JSON-RPC 2.0 dispatch, `tools/list`, `tools/call`. |
 | `invincible/core/router.py` | Provider loading, tiered failover, response trimming, timeouts. |
 | `invincible/core/provider_health.py` | Per-provider failure counts + exponential cooldowns. |
