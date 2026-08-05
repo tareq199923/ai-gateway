@@ -4,6 +4,8 @@
 Both console scripts (``invincible`` and ``inv``) declared in pyproject.toml
 point at the ``cli`` group defined here, so the two commands are identical.
 """
+import asyncio
+import importlib.resources
 import os
 import secrets
 
@@ -13,6 +15,7 @@ from dotenv import load_dotenv
 
 from invincible import __version__
 from invincible.core.router import load_providers_config
+from invincible.core.session_store import SessionStore
 
 SUPPORTED_ENV_KEYS = (
     "GATEWAY_API_KEY",
@@ -210,6 +213,105 @@ def start(host, port, reload, log_level, env_file, config_path, db_path):
         click.echo("Shutting down.")
 
 
+def _legacy_providers_path() -> str:
+    """Repository-root providers.yaml, mirroring router.py's fallback."""
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "providers.yaml",
+    )
+
+
+def _doctor_config_source() -> str:
+    """Resolve the effective providers.yaml path for diagnostics.
+
+    INVINCIBLE_CONFIG_PATH wins when set; otherwise the packaged
+    invincible/providers.yaml, falling back to the legacy repository-root
+    copy - same resolution order as the router.
+    """
+    env_path = os.getenv("INVINCIBLE_CONFIG_PATH")
+    if env_path:
+        return os.path.abspath(env_path)
+    try:
+        ref = importlib.resources.files("invincible").joinpath("providers.yaml")
+    except (ModuleNotFoundError, TypeError, AttributeError):
+        return _legacy_providers_path()
+    if ref.is_file():
+        return str(ref)
+    return _legacy_providers_path()
+
+
+async def _check_session_db(db_path):
+    """Try to open and initialize the session database like the app does at
+    startup (creating the file if missing). Returns (ok, note)."""
+    store = SessionStore(db_path=db_path)
+    try:
+        await store.init()
+    except Exception as exc:
+        return False, f"cannot open {store.db_path}: {exc}"
+    await store.close()
+    return True, store.db_path
+
+
+def _run_doctor_checks():
+    """Return (label, ok, note) tuples for every diagnostic check."""
+    checks = []
+
+    source = _doctor_config_source()
+    checks.append(("providers.yaml exists", os.path.isfile(source), source))
+
+    try:
+        load_providers_config(_doctor_config_source())
+        checks.append(("providers.yaml loads", True, ""))
+    except (OSError, ValueError) as exc:
+        checks.append(("providers.yaml loads", False, str(exc)))
+
+    ok, note = asyncio.run(_check_session_db(None))
+    checks.append(("session database accessible", ok, note))
+
+    for key in ("GATEWAY_API_KEY", "MCP_SHARED_SECRET"):
+        checks.append((f"{key} exists", bool(os.getenv(key)), ""))
+
+    return checks
+
+
+def _doctor_console():
+    """Return a rich Console if rich is installed, else None."""
+    try:
+        from rich.console import Console
+
+        return Console()
+    except ImportError:
+        return None
+
+
+@click.command()
+def doctor():
+    """Run environment and configuration diagnostics."""
+    checks = _run_doctor_checks()
+    console = _doctor_console()
+
+    lines = []
+    lines.append(f"Invincible version: {__version__}")
+    for label, ok, note in checks:
+        mark = "OK" if ok else "FAIL"
+        line = f"{mark}  {label}"
+        if note:
+            line += f"  ({note})"
+        lines.append(line)
+
+    if console is not None:
+        for line in lines:
+            colored = line.replace("OK  ", "[green]OK[/green]  ", 1)
+            colored = colored.replace("FAIL", "[red]FAIL[/red]", 1)
+            console.print(colored)
+    else:
+        for line in lines:
+            click.echo(line)
+
+    if any(not ok for _, ok, _ in checks):
+        raise click.exceptions.Exit(1)
+
+
 @click.group()
 @click.version_option(__version__, "--version", "-V", prog_name="invincible")
 def cli():
@@ -218,6 +320,7 @@ def cli():
 
 cli.add_command(setup)
 cli.add_command(start)
+cli.add_command(doctor)
 
 if __name__ == "__main__":
     cli()
