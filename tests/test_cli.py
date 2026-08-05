@@ -315,6 +315,11 @@ def test_start_propagates_config_and_db_path(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert seen["config"] == str(config)
     assert seen["db"] == str(db_target)
+    # `start` writes these straight into the process environment; monkeypatch
+    # cannot restore them (delenv on an absent var records nothing), so clean
+    # up explicitly to avoid leaking into later tests.
+    os.environ.pop("INVINCIBLE_CONFIG_PATH", None)
+    os.environ.pop("INVINCIBLE_DB_PATH", None)
 
 
 def test_start_missing_config_fails_cleanly(monkeypatch, tmp_path):
