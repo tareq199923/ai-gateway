@@ -153,6 +153,16 @@ def setup(env_file, force):
     click.echo(f"Configured {env_path}")
 
 
+def _load_env_file(env_file: str) -> str | None:
+    """Load an env file into the process environment without overriding
+    existing variables. Returns the absolute path when loaded, else None."""
+    env_abs = os.path.abspath(env_file)
+    if os.path.isfile(env_abs):
+        load_dotenv(dotenv_path=env_abs, override=False)
+        return env_abs
+    return None
+
+
 @click.command()
 @click.option("--host", default="127.0.0.1", show_default=True,
               help="Interface to bind the server to.")
@@ -173,14 +183,13 @@ def start(host, port, reload, log_level, env_file, config_path, db_path):
     if not 1 <= port <= 65535:
         raise click.ClickException(f"--port must be between 1 and 65535 (got {port})")
 
-    env_abs = os.path.abspath(env_file)
-    if os.path.isfile(env_abs):
-        # Existing process environment wins; explicit --env-file beats the
-        # default .env; nothing here overwrites a live environment variable.
-        load_dotenv(dotenv_path=env_abs, override=False)
+    env_abs = _load_env_file(env_file)
+    if env_abs:
         click.echo(f"Loaded environment from {env_abs}")
     else:
-        click.echo(f"Warning: env file not found: {env_abs}", err=True)
+        click.echo(
+            f"Warning: env file not found: {os.path.abspath(env_file)}", err=True
+        )
 
     if config_path:
         config_abs = os.path.abspath(config_path)
@@ -285,8 +294,11 @@ def _doctor_console():
 
 
 @click.command()
-def doctor():
+@click.option("--env-file", default=".env", show_default=True,
+              help=".env file to load before running checks.")
+def doctor(env_file):
     """Run environment and configuration diagnostics."""
+    _load_env_file(env_file)
     checks = _run_doctor_checks()
     console = _doctor_console()
 

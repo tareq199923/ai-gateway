@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from click.testing import CliRunner
 
@@ -154,3 +156,84 @@ def test_doctor_rich_console_propagates_failure(monkeypatch, tmp_path):
     result = _invoke()
     assert result.exit_code == 1
     assert any("[red]FAIL[/red]  GATEWAY_API_KEY exists" in line for line in printed)
+
+
+def _config_and_chdir(monkeypatch, tmp_path):
+    config = tmp_path / "providers.yaml"
+    config.write_text(VALID_YAML, encoding="utf-8")
+    monkeypatch.setattr("invincible.cli._doctor_config_source", lambda: str(config))
+    monkeypatch.chdir(tmp_path)
+
+
+def test_doctor_loads_keys_from_env_file(monkeypatch, tmp_path):
+    monkeypatch.delenv("GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("MCP_SHARED_SECRET", raising=False)
+    (tmp_path / ".env").write_text(
+        "GATEWAY_API_KEY=gw-from-env\nMCP_SHARED_SECRET=mcp-from-env\n",
+        encoding="utf-8",
+    )
+    _config_and_chdir(monkeypatch, tmp_path)
+
+    result = _invoke()
+    assert result.exit_code == 0
+    assert "OK  GATEWAY_API_KEY exists" in result.output
+    assert "OK  MCP_SHARED_SECRET exists" in result.output
+    # doctor stays quiet about the env file; output format is unchanged.
+    assert "Loaded environment from" not in result.output
+
+
+def test_doctor_existing_exports_win_over_env_file(monkeypatch, tmp_path):
+    _set_secrets(monkeypatch)
+    (tmp_path / ".env").write_text(
+        "GATEWAY_API_KEY=env-gw\nMCP_SHARED_SECRET=env-mcp\n",
+        encoding="utf-8",
+    )
+    _config_and_chdir(monkeypatch, tmp_path)
+
+    result = _invoke()
+    assert result.exit_code == 0
+    assert "OK  GATEWAY_API_KEY exists" in result.output
+    assert "OK  MCP_SHARED_SECRET exists" in result.output
+    assert os.environ["GATEWAY_API_KEY"] == "gw-key"
+    assert os.environ["MCP_SHARED_SECRET"] == "mcp-key"
+
+
+def test_doctor_missing_env_file_reports_missing_keys(monkeypatch, tmp_path):
+    monkeypatch.delenv("GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("MCP_SHARED_SECRET", raising=False)
+    _config_and_chdir(monkeypatch, tmp_path)
+
+    result = _invoke()
+    assert result.exit_code == 1
+    assert "FAIL  GATEWAY_API_KEY exists" in result.output
+    assert "FAIL  MCP_SHARED_SECRET exists" in result.output
+
+
+def test_doctor_env_file_without_keys_still_fails(monkeypatch, tmp_path):
+    monkeypatch.delenv("GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("MCP_SHARED_SECRET", raising=False)
+    (tmp_path / ".env").write_text(
+        "SOME_OTHER_KEY=value\n", encoding="utf-8"
+    )
+    _config_and_chdir(monkeypatch, tmp_path)
+
+    result = _invoke()
+    assert result.exit_code == 1
+    assert "FAIL  GATEWAY_API_KEY exists" in result.output
+    assert "FAIL  MCP_SHARED_SECRET exists" in result.output
+
+
+def test_doctor_custom_env_file_option(monkeypatch, tmp_path):
+    monkeypatch.delenv("GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("MCP_SHARED_SECRET", raising=False)
+    custom = tmp_path / ".env.doctor"
+    custom.write_text(
+        "GATEWAY_API_KEY=custom-gw\nMCP_SHARED_SECRET=custom-mcp\n",
+        encoding="utf-8",
+    )
+    _config_and_chdir(monkeypatch, tmp_path)
+
+    result = _invoke(["doctor", "--env-file", str(custom)])
+    assert result.exit_code == 0
+    assert "OK  GATEWAY_API_KEY exists" in result.output
+    assert "OK  MCP_SHARED_SECRET exists" in result.output
