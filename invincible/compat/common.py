@@ -1,0 +1,33 @@
+# invincible/compat/common.py
+"""Protocol-neutral helpers shared by the compatibility layers.
+
+Everything here operates on the *internal* message model:
+
+    [{"role": "system" | "user" | "assistant", "content": str}, …]
+
+It must never depend on FastAPI or the Router.
+"""
+from invincible.core.router import estimate_tokens
+
+
+def build_message(role: str, content: str) -> dict:
+    """Build one internal message from a role and text content."""
+    return {"role": role, "content": content}
+
+
+def build_usage(input_tokens: int, output_tokens: int) -> dict:
+    """Build a protocol-neutral usage counter pair."""
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+    }
+
+
+def estimate_token_sum(messages: list) -> int:
+    """Rough total token estimate for a list of internal messages.
+
+    Reuses the Router's public heuristic (``router.estimate_tokens``) so the
+    compatibility layer never maintains its own token-counting logic. Always
+    returns at least 1 per message, identical to the trimmers' estimate.
+    """
+    return sum(estimate_tokens(m) for m in messages)

@@ -15,6 +15,9 @@ serves two roles in one process:
    endpoint that fans requests across tiered upstream providers (Groq,
    Gemini, OpenRouter) and transparently fails over on rate limits (429) and
    server errors, so a free-tier 429 no longer kills an agent's workflow.
+   It also speaks the **Anthropic Messages API** (`POST /v1/messages`), so
+   Claude Code and other Anthropic-native clients plug in with a one-line
+   config change.
 2. **Local MCP Tool Server** — a JSON-RPC 2.0 `/mcp` endpoint exposing
    `read_file`, `execute_bash`, and `write_file` to a cloud-hosted AI that
    reaches your machine through a tunnel, letting it read local files, write
@@ -45,6 +48,7 @@ serves two roles in one process:
 | **Context trimming** | Per-provider `max_context`; system messages always kept; everything else dropped as atomic *turns* (an assistant `tool_calls` is never separated from its tool results); the most recent turn is always sent. |
 | **Per-provider timeouts** | Split connect/read/write/pool with sane defaults and per-provider overrides (Gemini gets 90s read, the free OpenRouter fallback 20s). |
 | **MCP tool server** | `read_file` (no confirmation), `execute_bash` and `write_file` (interactive y/N at the server terminal), guarded by denylists and a separate `MCP_SHARED_SECRET` auth. |
+| **Protocol-agnostic** | Native **OpenAI** and **Anthropic** protocols, both translated into one internal message model. Claude Code works with `ANTHROPIC_BASE_URL` pointing at the gateway. |
 
 ---
 
@@ -143,8 +147,11 @@ Full CLI reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md) → *CLI refe
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/` | none | Health check → `{"status": "healthy"}` |
+| `HEAD` | `/` | none | 200 OK — Claude Code's base-URL probe |
+| `GET` | `/health` | none | Service detail → `{"service", "status", "version"}` |
 | `GET` | `/v1/models` | `Authorization: Bearer <GATEWAY_API_KEY>` | OpenAI-compatible model list from `providers.yaml` |
-| `POST` | `/v1/chat/completions` | `Authorization: Bearer <GATEWAY_API_KEY>` | Chat completion with tiered failover |
+| `POST` | `/v1/chat/completions` | `Authorization: Bearer <GATEWAY_API_KEY>` | OpenAI chat completion with tiered failover |
+| `POST` | `/v1/messages` | `Authorization: Bearer <GATEWAY_API_KEY>` | Anthropic Messages API with tiered failover |
 
 ### Chat request
 
@@ -166,6 +173,48 @@ Full CLI reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md) → *CLI refe
 - **Response**: the upstream provider's JSON is forwarded **verbatim**
   (non-streaming).
 
+### Anthropic Messages (`POST /v1/messages`)
+
+Invincible also speaks the **Anthropic Messages API**, so Claude Code and
+other Anthropic-native clients work without modification:
+
+```bash
+# .env for Claude Code (or your shell):
+ANTHROPIC_BASE_URL=http://127.0.0.1:8000
+```
+
+Claude Code probes `HEAD /`, then calls `POST /v1/messages?beta=true` — both
+are served. Supported request fields: `model`, `system`, `messages`,
+`max_tokens`, `stream`. Everything else Claude Code sends (`tools`,
+`tool_choice`, `metadata`, `temperature`, `top_p`, `top_k`,
+`stop_sequences`, unknown fields, `anthropic-beta` / `anthropic-version`
+headers, the `?beta=true` query) is **accepted and ignored** — never a 422.
+
+The `model` field is treated as a **client hint only**: it is echoed back
+in the response but never influences routing. The Router picks providers
+exactly as it does for OpenAI clients, and the upstream model comes from
+`providers.yaml`.
+
+- **Streaming**: `stream: true` returns Anthropic SSE events in the
+  canonical order — `message_start` → `content_block_start` →
+  `content_block_delta` (one per text delta) → `content_block_stop` →
+  `message_delta` → `message_stop`. Content blocks (`tool_use`,
+  `tool_result`, `image`, …) are flattened to text: `tool_use` becomes a
+  `[tool_use: <name>]` tag and `tool_result` keeps its text, so tool-shaped
+  conversations round-trip without crashing. A mid-stream upstream failure
+  emits a well-formed Anthropic `error` event and closes — never malformed
+  SSE.
+- **Sessions**: the same `X-Session-Id` header and SQLite store are used,
+  and history is serialized in the shared internal format — an OpenAI
+  client and a Claude Code session on the same id see the same
+  conversation.
+- **Errors**: mapped to Anthropic error types (`invalid_request_error`,
+  `authentication_error`, `permission_error`, `not_found_error`,
+  `rate_limit_error`, `api_error`, `overloaded_error`) with sanitized
+  messages; upstream provider bodies are never forwarded.
+- **Unsupported today**: real tool execution (tool calls are degraded to
+  text) and image content (skipped during flattening).
+
 ### Status codes
 
 | Status | When |
@@ -175,6 +224,10 @@ Full CLI reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md) → *CLI refe
 | `422` | Body fails validation (missing `messages`, extra fields) |
 | `4xx` | Upstream returned a non-failover error (e.g. 400) — forwarded verbatim |
 | `503` | All providers failed or are in cooldown (before streaming starts) |
+
+The Anthropic endpoint uses the same statuses; error bodies are Anthropic
+shaped (`{"type": "error", "error": {"type": …, "message": …}}`) and map to
+Anthropic error types.
 
 Full contract — sessions, trimming, timeout semantics:
 [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
@@ -295,7 +348,27 @@ data: {"id":"chatcmpl-...","object":"chat.completion.chunk","created":1783161600
 data: [DONE]
 ```
 
-### 5. List MCP tools
+### 5. Use it from Claude Code (Anthropic)
+
+```bash
+ANTHROPIC_BASE_URL=http://127.0.0.1:8000 claude
+```
+
+Claude Code probes `HEAD /`, then calls `POST /v1/messages` with streaming.
+You can send the same call directly:
+
+```bash
+curl http://127.0.0.1:8000/v1/messages \
+  -H "Authorization: Bearer $GATEWAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4","max_tokens":1024,
+       "messages":[{"role":"user","content":"Hello!"}]}'
+```
+
+And stream it (`stream: true`) to receive Anthropic SSE events ending in
+`message_stop`.
+
+### 6. List MCP tools
 
 ```bash
 curl -X POST http://127.0.0.1:8000/mcp \
@@ -304,7 +377,7 @@ curl -X POST http://127.0.0.1:8000/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-### 6. Run a command via MCP
+### 7. Run a command via MCP
 
 ```bash
 curl -X POST http://127.0.0.1:8000/mcp \
@@ -316,7 +389,7 @@ curl -X POST http://127.0.0.1:8000/mcp \
 
 Expect a `[y/N]` prompt at the server terminal before it runs.
 
-### 7. Expose to a cloud AI over a tunnel
+### 8. Expose to a cloud AI over a tunnel
 
 ```bash
 cloudflared tunnel --url http://127.0.0.1:8000
@@ -332,18 +405,20 @@ More MCP protocol details: [docs/MCP_PROTOCOL.md](docs/MCP_PROTOCOL.md).
 ## Architecture
 
 ```
-                         ┌──────────────────────────────┐
-  OpenAI-compatible      │  invincible/main.py          │
-  agent  ─── /v1/chat ─► │  (FastAPI)                   │
-                         │                              │
-  Cloud AI      ─── /mcp ─►  openai_compat │ mcp routers │
-  (via tunnel)           │                              │
-                         └──────┬────────────────┬──────┘
-                                │                │
-                  ┌─────────────▼──┐    ┌─────────▼──────────┐
-                  │ core/router.py │    │ core/tool_executor  │
-                  │ tiered failover│    │ (denylist + confirm)│
-                  │ + ctx trimming │    └─────────────────────┘
+                         ┌──────────────────────────────────┐
+  OpenAI-compatible      │  invincible/main.py              │
+  agent  ─── /v1/chat ─► │  (FastAPI)                        │
+         Claude Code     │                        compat/    │
+  (Anthropic) ─ /v1/msg ►│  openai_compat ──────► anthropic │
+                         │  │ mcp routers │                 │
+  Cloud AI      ─── /mcp ─►  │ core/router.py               │
+  (via tunnel)           │  │ core/tool_executor (denylist) │
+                         └──────┬──────────────┬────────────┘
+                                │              │
+                  ┌─────────────▼──┐   ┌───────▼────────────┐
+                  │ core/router.py │   │ core/tool_executor │
+                  │ tiered failover│   │ (denylist + confirm)│
+                  │ + ctx trimming │   └─────────────────────┘
                   └───────┬────────┘
                           │
             ┌─────────────▼──────────────┐
@@ -353,12 +428,20 @@ More MCP protocol details: [docs/MCP_PROTOCOL.md](docs/MCP_PROTOCOL.md).
             └────────────────────────────┘
 ```
 
+The compatibility layers (OpenAI and Anthropic) only translate; both
+produce the same internal message model, which is what the Router, session
+store, and trimming logic consume.
+
 ### Package layout
 
 | Path | Role |
 |---|---|
-| `invincible/main.py` | FastAPI app, lifespan, two auth dependencies, router wiring. |
+| `invincible/main.py` | FastAPI app, lifespan, auth dependencies, router wiring, `HEAD /` and `/health`. |
 | `invincible/endpoints/openai_compat.py` | `POST /v1/chat/completions` (JSON + SSE streaming, session merge + upstream call); `GET /v1/models`. |
+| `invincible/endpoints/anthropic_compat.py` | `POST /v1/messages`; translates Anthropic ↔ internal model, calls the same Router. |
+| `invincible/models/anthropic.py` | Pydantic request model: only real fields declared; everything else ignored. |
+| `invincible/compat/common.py` | Protocol-neutral internal-message/usage helpers shared by compat layers. |
+| `invincible/compat/anthropic.py` | Pure Anthropic translators: flattening, finish-reason map, error map, Anthropic SSE streaming. |
 | `invincible/endpoints/mcp.py` | `POST /mcp`; JSON-RPC 2.0 dispatch, `tools/list`, `tools/call`. |
 | `invincible/core/router.py` | Provider loading, tiered failover, response trimming, timeouts. |
 | `invincible/core/provider_health.py` | Per-provider failure counts + exponential cooldowns. |
@@ -384,9 +467,10 @@ More MCP protocol details: [docs/MCP_PROTOCOL.md](docs/MCP_PROTOCOL.md).
 
 ## Known limits (tl;dr)
 
-- OpenAI-compatible **chat completions only** — no Anthropic Messages API
-  translation.
-- **No streaming** — `stream: true` is rejected with HTTP 400.
+- Anthropic **tool execution is not surfaced** — `tool_use`/`tool_result`
+  blocks are flattened to text (a `[tool_use: <name>]` tag) so tool-shaped
+  conversations round-trip without crashing; the model answers in text.
+- Image content blocks are **skipped** during flattening.
 - Denylists are **text-pattern matches, not shell parsers** — wrappers like
   `powershell -Command` can smuggle commands past them; the interactive
   confirmation prompt is the real safety boundary.

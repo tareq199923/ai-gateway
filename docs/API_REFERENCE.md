@@ -1,7 +1,8 @@
-# API Reference — `/v1/chat/completions`
+# API Reference — Chat completions & Anthropic Messages
 
-The OpenAI-compatible chat surface. A single endpoint, plus a health check.
-The provider behind it is chosen by the router, not by the client.
+The OpenAI-compatible chat surface, plus the Anthropic Messages
+compatibility layer. Both endpoints converge on the same Router — the
+provider behind either request is chosen by the Router, never by the client.
 
 ---
 
@@ -10,10 +11,13 @@ The provider behind it is chosen by the router, not by the client.
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/` | none | Health check → `{"status": "healthy"}` |
-| `POST` | `/v1/chat/completions` | `Authorization: Bearer <GATEWAY_API_KEY>` | Chat completion with failover |
+| `HEAD` | `/` | none | 200 OK (Claude Code base-URL probe) |
+| `GET` | `/health` | none | `{"service", "status", "version"}` |
+| `POST` | `/v1/chat/completions` | `Authorization: Bearer <GATEWAY_API_KEY>` | OpenAI chat completion with failover |
+| `POST` | `/v1/messages` | `Authorization: Bearer <GATEWAY_API_KEY>` | Anthropic Messages completion with failover |
 
-Auth details: if `GATEWAY_API_KEY` is **unset**, the chat endpoint is open
-(no auth enforced). Wrong/missing key with the key set → `401`.
+Auth details: if `GATEWAY_API_KEY` is **unset**, both chat endpoints are
+open (no auth enforced). Wrong/missing key with the key set → `401`.
 
 ---
 
@@ -31,7 +35,7 @@ Content-Type: application/json
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `messages` | array of objects | **yes** | Standard OpenAI messages (`role`, `content`, optional `tool_calls`/`tool_call_id`). |
-| `stream` | boolean | no | **Must be `false`/absent** — `true` → `400`. Streaming is not supported. |
+| `stream` | boolean | no | `true` → SSE stream of `chat.completion.chunk` events ending in `data: [DONE]`; `false`/absent → JSON. |
 
 Other OpenAI fields (`model`, `temperature`, `max_tokens`, …) are **not
 accepted** — `ChatRequest` only defines `messages` and `stream`, so sending
@@ -75,8 +79,7 @@ Session persistence only happens if `choices[0].message` exists.
 
 | Status | When | Body shape |
 |---|---|---|
-| `200` | Upstream success | Upstream body verbatim |
-| `400` | `stream: true` | `{"error": {"message": "Streaming is not currently supported by this server.", "type": "invalid_request_error"}}` |
+| `200` | Upstream success | Upstream body verbatim, or SSE stream (`stream: true`) |
 | `401` | Missing/invalid `GATEWAY_API_KEY` | `{"detail": {"error": {"message": "...", "type": "auth_error"}}}` (FastAPI HTTPException) |
 | `422` | Body fails Pydantic validation (missing `messages`, extra fields) | FastAPI validation detail |
 | `4xx` (forwarded) | Upstream returned a non-failover error (see below) | **Upstream's own error body**, status copied |
@@ -133,3 +136,110 @@ Per-provider split timeouts (defaults `connect 5s / read 60s / write 5s /
 pool 2s`, overridable in `providers.yaml`). The shipped config gives Gemini
 `90s`, Groq `45s`, and the OpenRouter fallback `20s` reads. See
 [docs/CONFIGURATION.md](CONFIGURATION.md).
+
+---
+
+## 7. Anthropic Messages (`POST /v1/messages`)
+
+An additive compatibility layer: translates Anthropic requests into the
+same internal message model the OpenAI endpoint uses, calls the **same
+Router** (provider selection, failover, cooldowns, trimming, sessions all
+apply unchanged), and translates the response back to Anthropic format.
+
+```
+POST /v1/messages?beta=true       # the ?beta=true is ignored
+Authorization: Bearer <GATEWAY_API_KEY>
+anthropic-version: 2023-06-01      # accepted, not required
+anthropic-beta: ...                # accepted, ignored
+X-Session-Id: <id>                 # optional, default "default"
+Content-Type: application/json
+```
+
+### Declared fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `messages` | array | **Required.** `role` (`user`/`assistant`) + `content` (string or content blocks). See flattening below. |
+| `model` | string, optional | **Client hint only.** Echoed in the response; never affects routing and never requires the provider to expose Claude model names. |
+| `system` | string \| [blocks], optional | Becomes a leading `system` message (always kept by trimming). |
+| `max_tokens` | int, optional | Accepted; the Router controls the upstream output budget per provider. |
+| `stream` | bool, optional | `true` → Anthropic SSE events; otherwise JSON. |
+
+All other Anthropic request fields — `tools`, `tool_choice`, `metadata`,
+`temperature`, `top_p`, `top_k`, `stop_sequences`, and any unknown field —
+are **accepted and ignored** (`extra="ignore"`). Claude Code never receives
+a `422` for optional features Invincible doesn't implement.
+
+### Content-block flattening
+
+`content` blocks are flattened to text instead of dropped:
+
+| Block type | Result |
+|---|---|
+| `text` | text concatenated |
+| `tool_use` | `[tool_use: <name>]` placeholder tag |
+| `tool_result` | its text (string or nested text blocks) |
+| `image` / unknown | skipped |
+
+### Non-streaming response
+
+```json
+{
+  "id": "msg_...",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4",
+  "content": [{"type": "text", "text": "Hello!"}],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {"input_tokens": 12, "output_tokens": 3}
+}
+```
+
+- `stop_reason` maps from OpenAI `finish_reason`: `stop`→`end_turn`,
+  `length`→`max_tokens`, `tool_calls`→`tool_use` (see
+  `translate_finish_reason`), unknown/absent→`end_turn`.
+- `usage` token counts are **estimates** (the Router's own `estimate_tokens`
+  heuristic) because upstream streaming responses rarely report usage.
+
+### Streaming (`stream: true`)
+
+Anthropic SSE events, one per frame (`event: <name>\ndata: <json>\n\n`),
+in canonical order:
+
+```
+message_start → content_block_start → content_block_delta (× text deltas)
+→ content_block_stop → message_delta → message_stop
+```
+
+- `message_start.message.content` is `[]` and carries the estimated usage.
+- Each `content_block_delta` carries `{"type": "text_delta", "text": …}`.
+- `message_delta` carries the final `stop_reason` and `output_tokens`.
+- A **mid-stream upstream failure** emits a well-formed Anthropic `error`
+  event and closes cleanly — no malformed SSE, no `message_stop`.
+
+### Sessions & cross-protocol sharing
+
+`X-Session-Id` works identically and history is stored in the shared internal
+format (`{"role", "content"}`), so an OpenAI client and Claude Code on the
+same session id see the same conversation. The streamed reply is
+reconstructed from deltas and persisted once the stream completes.
+
+### Error translation
+
+Router errors become Anthropic-shaped, sanitized errors
+(`{"type": "error", "error": {"type": …, "message": …}}`):
+
+| Status | Anthropic type |
+|---|---|
+| `400` | `invalid_request_error` |
+| `401` | `authentication_error` |
+| `403` | `permission_error` |
+| `404` | `not_found_error` |
+| `429` | `rate_limit_error` |
+| `500` | `api_error` |
+| `503` | `overloaded_error` |
+
+`422` is reserved for Pydantic structural validation (e.g. missing
+`messages`). Upstream provider error bodies are **never** forwarded verbatim.
+The router's failover/trimming semantics in sections 4–5 apply unchanged.

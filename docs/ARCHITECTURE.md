@@ -9,12 +9,18 @@ non-obvious algorithms (context trimming, cooldowns, config resolution).
 
 ```
 invincible/
-├── main.py                     FastAPI app, lifespan, auth wiring
-├── cli.py                      Click CLI (setup / start)
+├── main.py                     FastAPI app, lifespan, auth wiring, /health, HEAD /
+├── cli.py                      Click CLI (setup / start / doctor)
 ├── providers.yaml              Canonical provider config (packaged)
 ├── endpoints/
-│   ├── openai_compat.py        POST /v1/chat/completions
+│   ├── openai_compat.py        POST /v1/chat/completions, GET /v1/models
+│   ├── anthropic_compat.py     POST /v1/messages (Anthropic protocol)
 │   └── mcp.py                  POST /mcp (JSON-RPC 2.0 dispatch)
+├── models/
+│   └── anthropic.py            Pydantic request model (ignores unknown fields)
+├── compat/
+│   ├── common.py               Protocol-neutral internal-message helpers
+│   └── anthropic.py            Pure Anthropic translators + SSE streaming
 └── core/
     ├── router.py               Provider loading, failover, trimming, timeouts
     ├── provider_health.py      Per-provider failure counts + cooldowns
@@ -90,6 +96,51 @@ openai_compat
   ▼
 client
 ```
+
+---
+
+## 3a. Anthropic request flow (`/v1/messages`)
+
+A pure compatibility layer over the same Router. The Router never knows the
+client was Anthropic — it only ever receives the internal message model.
+
+```
+Claude Code
+  │  HEAD /  → 200                       (base-URL probe)
+  │  POST /v1/messages?beta=true
+  │  anthropic-version / anthropic-beta headers (accepted, ignored)
+  ▼
+main.py::require_auth                     same GATEWAY_API_KEY as OpenAI
+  ▼
+anthropic_compat::anthropic_messages
+  │  1. anthropic_to_internal(messages, system) → internal model
+  │       system            → leading {role: system}
+  │       text/image blocks → text concatenated
+  │       tool_use          → "[tool_use: <name>]" tag
+  │       tool_result      → its text
+  │  2. session_id = X-Session-Id or "default"
+  │  3. full = session_store.load(session_id) + internal_messages
+  │  4. input_tokens = estimate_token_sum(full)
+  │  5. stream?  router.stream_open(full) : router.route_request(full)
+  ▼
+router (identical to section 3 — failover, cooldowns, trimming all apply)
+  ▼
+anthropic_compat
+  │  non-stream: internal_to_anthropic(result, model_hint, input_tokens)
+  │              → message payload (id msg_*, stop_reason, estimated usage)
+  │  stream: build_stream_events() → message_start → content_block_start
+  │          → content_block_delta* → content_block_stop → message_delta
+  │          → message_stop; mid-stream failure → well-formed error event
+  │  session save: same internal {role, content} format as OpenAI
+  │  errors: mapped to Anthropic types, sanitized (never forwards upstream)
+  ▼
+Claude Code
+```
+
+The translation functions in `compat/anthropic.py` are pure: no FastAPI,
+no Router imports. They only convert data, so a future protocol
+(e.g. a raw Cursor/Open WebUI dialect) adds a compat module without
+touching the core.
 
 ---
 

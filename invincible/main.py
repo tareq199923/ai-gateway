@@ -3,10 +3,12 @@ import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 
+from invincible import __version__
 from invincible.core.router import Router
 from invincible.core.session_store import SessionStore
+from invincible.endpoints.anthropic_compat import router as anthropic_router
 from invincible.endpoints.mcp import require_mcp_auth
 from invincible.endpoints.mcp import router as mcp_router
 from invincible.endpoints.openai_compat import router as openai_router
@@ -54,8 +56,23 @@ async def require_auth(request: Request):
         )
 
 app.include_router(openai_router, dependencies=[Depends(require_auth)])
+app.include_router(anthropic_router, dependencies=[Depends(require_auth)])
 app.include_router(mcp_router, dependencies=[Depends(require_mcp_auth)])
 
 @app.get("/")
 def health_check():
     return {"status": "healthy"}
+
+@app.head("/")
+async def head_check():
+    # Claude Code probes the base URL with HEAD before sending
+    # POST /v1/messages; answer 200 with an empty body.
+    return Response(status_code=200)
+
+@app.get("/health")
+def health_detail():
+    return {
+        "service": "Invincible",
+        "status": "ok",
+        "version": __version__,
+    }
