@@ -1,8 +1,11 @@
+import json
+
 import httpx
 import pytest
 
 from invincible.core.session_store import SessionStore
-from tests.conftest import provider_body
+from invincible.main import app
+from tests.conftest import provider_body, sse_body, stream_chunk
 
 
 @pytest.mark.asyncio
@@ -100,3 +103,47 @@ async def test_different_session_ids_do_not_share_history(router_setter, client)
     payload = json.loads(received[0])
     contents = [m["content"] for m in payload["messages"]]
     assert "secret: banana" not in contents
+
+
+@pytest.mark.asyncio
+async def test_streamed_reply_is_persisted_to_session(client, router_setter):
+    """The streamed reply is reconstructed from the chunk deltas and saved to
+    the session store once the stream completes, like the non-stream path."""
+    received_payloads = []
+
+    def alpha_handler(request: httpx.Request):
+        received_payloads.append(json.loads(request.read()))
+        return httpx.Response(
+            200,
+            content=sse_body(
+                stream_chunk("alpha", {"role": "assistant"}),
+                stream_chunk("alpha", {"content": "Hello"}),
+                stream_chunk("alpha", {"content": " world"}),
+                stream_chunk("alpha", {}, finish_reason="stop"),
+            ),
+        )
+
+    router_setter({"alpha.example.com": alpha_handler})
+
+    headers = {
+        "Authorization": "Bearer test-gateway-key",
+        "X-Session-Id": "stream-convo",
+    }
+    await client.post(
+        "/v1/chat/completions",
+        headers=headers,
+        json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
+    )
+
+    history = await app.state.sessions.load("stream-convo")
+    assistant_messages = [m for m in history if m["role"] == "assistant"]
+    assert len(assistant_messages) == 1
+    assert assistant_messages[0]["content"] == "Hello world"
+
+    await client.post(
+        "/v1/chat/completions",
+        headers=headers,
+        json={"messages": [{"role": "user", "content": "again"}]},
+    )
+    second_outgoing = received_payloads[1]["messages"]
+    assert [m["content"] for m in second_outgoing] == ["hi", "Hello world", "again"]

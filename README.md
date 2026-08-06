@@ -149,23 +149,32 @@ Full CLI reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md) → *CLI refe
 ### Chat request
 
 - **Body**: `{"messages": [...], "stream": false}` — OpenAI message format.
-  Only `messages` and `stream` are accepted; `stream: true` → **400** (no
-  streaming). Other OpenAI fields are rejected with **422**.
+  Only `messages` and `stream` are accepted. Other OpenAI fields are rejected
+  with **422**.
+- **Streaming**: `stream: true` returns an OpenAI-compatible
+  Server-Sent Events (`text/event-stream`) response. Each event is a
+  `chat.completion.chunk` (`data: {…}\n\n`), and the stream ends with
+  `data: [DONE]`. Chunks are forwarded from the upstream provider as they
+  arrive — nothing is buffered. Providers that fail before the first chunk
+  trigger the normal failover; an error after streaming has begun terminates
+  the stream with a well-formed `data: {"error": …}` event.
 - **Sessions**: history is loaded from SQLite keyed by the `X-Session-Id`
   header (default `default`), prepended to your messages, and the assistant
   reply is persisted back. `session_id` is a partition key, not a credential.
-- **Response**: the upstream provider's JSON is forwarded **verbatim**.
+  For streamed responses the reply is reconstructed from the chunk deltas and
+  saved once the stream completes.
+- **Response**: the upstream provider's JSON is forwarded **verbatim**
+  (non-streaming).
 
 ### Status codes
 
 | Status | When |
 |---|---|
-| `200` | Upstream success (body forwarded verbatim) |
-| `400` | `stream: true` |
+| `200` | Upstream success — JSON body forwarded verbatim, or SSE stream (`stream: true`) |
 | `401` | Missing/invalid `GATEWAY_API_KEY` (when set) |
 | `422` | Body fails validation (missing `messages`, extra fields) |
 | `4xx` | Upstream returned a non-failover error (e.g. 400) — forwarded verbatim |
-| `503` | All providers failed or are in cooldown |
+| `503` | All providers failed or are in cooldown (before streaming starts) |
 
 Full contract — sessions, trimming, timeout semantics:
 [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
@@ -264,7 +273,29 @@ The assistant reply is stored under `my-conversation` and will be included in
 your next request with the same `X-Session-Id` — the model remembers the
 conversation.
 
-### 4. List MCP tools
+### 4. Stream a chat (SSE)
+
+```bash
+curl -N http://127.0.0.1:8000/v1/chat/completions \
+  -H "Authorization: Bearer $GATEWAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Hello!"}], "stream": true}'
+```
+
+`-N` (aka `--no-buffer`) prints each event as it arrives. Tokens are streamed
+as OpenAI-compatible `chat.completion.chunk` events:
+
+```json
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","created":1783161600,"model":"gemini-2.5-flash","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","created":1783161600,"model":"gemini-2.5-flash","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","created":1783161600,"model":"gemini-2.5-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+
+### 5. List MCP tools
 
 ```bash
 curl -X POST http://127.0.0.1:8000/mcp \
@@ -273,7 +304,7 @@ curl -X POST http://127.0.0.1:8000/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-### 5. Run a command via MCP
+### 6. Run a command via MCP
 
 ```bash
 curl -X POST http://127.0.0.1:8000/mcp \
@@ -285,7 +316,7 @@ curl -X POST http://127.0.0.1:8000/mcp \
 
 Expect a `[y/N]` prompt at the server terminal before it runs.
 
-### 6. Expose to a cloud AI over a tunnel
+### 7. Expose to a cloud AI over a tunnel
 
 ```bash
 cloudflared tunnel --url http://127.0.0.1:8000
@@ -327,7 +358,7 @@ More MCP protocol details: [docs/MCP_PROTOCOL.md](docs/MCP_PROTOCOL.md).
 | Path | Role |
 |---|---|
 | `invincible/main.py` | FastAPI app, lifespan, two auth dependencies, router wiring. |
-| `invincible/endpoints/openai_compat.py` | `POST /v1/chat/completions` (session merge + upstream call); `GET /v1/models`. |
+| `invincible/endpoints/openai_compat.py` | `POST /v1/chat/completions` (JSON + SSE streaming, session merge + upstream call); `GET /v1/models`. |
 | `invincible/endpoints/mcp.py` | `POST /mcp`; JSON-RPC 2.0 dispatch, `tools/list`, `tools/call`. |
 | `invincible/core/router.py` | Provider loading, tiered failover, response trimming, timeouts. |
 | `invincible/core/provider_health.py` | Per-provider failure counts + exponential cooldowns. |

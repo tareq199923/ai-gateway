@@ -1,9 +1,19 @@
+import json
+
 import httpx
 
-from tests.conftest import default_providers, provider_body
+from tests.conftest import default_providers, provider_body, sse_body, stream_chunk
 
 MESSAGES = [{"role": "user", "content": "hi"}]
 AUTH = {"Authorization": "Bearer test-gateway-key"}
+
+
+async def _events(response):
+    return [
+        event[len("data: "):]
+        for event in response.text.split("\n\n")
+        if event.startswith("data: ") and not event.startswith("data: [DONE]")
+    ]
 
 
 async def test_health_check(client):
@@ -24,14 +34,167 @@ async def test_chat_completion_success(client, router_setter):
     assert response.json() == alpha_body
 
 
-async def test_streaming_rejected(client):
+async def test_streaming_true_returns_event_stream(client, router_setter):
+    router_setter(
+        handlers={
+            "alpha.example.com": httpx.Response(
+                200,
+                content=sse_body(stream_chunk("alpha", {"role": "assistant"})),
+            )
+        }
+    )
     response = await client.post(
         "/v1/chat/completions",
         headers=AUTH,
         json={"messages": MESSAGES, "stream": True},
     )
-    assert response.status_code == 400
-    assert "not currently supported" in response.json()["error"]["message"]
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+
+async def test_streaming_chunks_emitted_incrementally(client, router_setter):
+    chunks = [
+        stream_chunk("alpha", {"role": "assistant"}),
+        stream_chunk("alpha", {"content": "Hel"}),
+        stream_chunk("alpha", {"content": "lo!"}),
+        stream_chunk("alpha", {}, finish_reason="stop"),
+    ]
+    router_setter(
+        handlers={"alpha.example.com": httpx.Response(200, content=sse_body(*chunks))}
+    )
+    response = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH,
+        json={"messages": MESSAGES, "stream": True},
+    )
+    assert response.status_code == 200
+    payloads = [json.loads(event) for event in await _events(response)]
+    assert [
+        p["choices"][0]["delta"] for p in payloads
+    ] == [
+        {"role": "assistant"},
+        {"content": "Hel"},
+        {"content": "lo!"},
+        {},
+    ]
+    assert payloads[-1]["choices"][0]["finish_reason"] == "stop"
+
+
+async def test_streaming_ends_with_done(client, router_setter):
+    router_setter(
+        handlers={
+            "alpha.example.com": httpx.Response(
+                200,
+                content=sse_body(stream_chunk("alpha", {"content": "hi"})),
+            )
+        }
+    )
+    response = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH,
+        json={"messages": MESSAGES, "stream": True},
+    )
+    assert response.text.endswith("data: [DONE]\n\n")
+
+
+async def test_streaming_auth_enforced(client):
+    response = await client.post(
+        "/v1/chat/completions", json={"messages": MESSAGES, "stream": True}
+    )
+    assert response.status_code == 401
+
+
+async def test_stream_false_returns_json(client, router_setter):
+    alpha_body = provider_body("alpha")
+    router_setter(
+        handlers={"alpha.example.com": httpx.Response(200, json=alpha_body)}
+    )
+    response = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH,
+        json={"messages": MESSAGES, "stream": False},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == alpha_body
+
+
+async def test_streaming_failover_before_first_chunk(client, router_setter):
+    router = router_setter(
+        handlers={
+            "alpha.example.com": httpx.Response(429),
+            "beta.example.com": httpx.Response(
+                200,
+                content=sse_body(
+                    stream_chunk("beta", {"role": "assistant"}),
+                    stream_chunk("beta", {"content": "hi"}),
+                    stream_chunk("beta", {}, finish_reason="stop"),
+                ),
+            ),
+        }
+    )
+    response = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH,
+        json={"messages": MESSAGES, "stream": True},
+    )
+    assert response.status_code == 200
+    payloads = [json.loads(event) for event in await _events(response)]
+    assert payloads[0]["model"] == "beta-model"
+    assert not router.health_tracker.is_available("alpha")
+
+
+async def test_streaming_all_providers_fail_returns_503(client, router_setter):
+    router_setter(
+        handlers={
+            "alpha.example.com": httpx.Response(429),
+            "beta.example.com": httpx.Response(500),
+            "gamma.example.com": httpx.Response(429),
+        }
+    )
+    response = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH,
+        json={"messages": MESSAGES, "stream": True},
+    )
+    assert response.status_code == 503
+    assert response.json()["error"]["type"] == "gateway_error"
+
+
+class _FailingStream(httpx.AsyncByteStream):
+    def __init__(self, prefix: bytes):
+        self._prefix = prefix
+
+    async def __aiter__(self):
+        yield self._prefix
+        raise httpx.StreamError("connection dropped mid-stream")
+
+    async def aclose(self):
+        pass
+
+
+async def test_streaming_midstream_error_terminates_cleanly(client, router_setter):
+    stream = _FailingStream(
+        sse_body(stream_chunk("alpha", {"role": "assistant"}), done=False).encode()
+    )
+    router_setter(
+        handlers={
+            "alpha.example.com": httpx.Response(
+                200,
+                stream=stream,
+                headers={"content-type": "text/event-stream"},
+            )
+        }
+    )
+    response = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH,
+        json={"messages": MESSAGES, "stream": True},
+    )
+    assert response.status_code == 200
+    assert "data: " in response.text
+    assert '"error"' in response.text
+    assert not response.text.endswith("data: [DONE]\n\n")
 
 
 async def test_missing_auth_returns_401(client):

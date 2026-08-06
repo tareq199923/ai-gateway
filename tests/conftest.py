@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 import yaml
@@ -105,3 +107,20 @@ def provider_body(provider_name, content="hello"):
             {"message": {"role": "assistant", "content": content}}
         ],
     }
+
+
+def stream_chunk(provider, delta, finish_reason=None):
+    return {
+        "id": f"cmpl-{provider}",
+        "object": "chat.completion.chunk",
+        "created": 1234567890,
+        "model": f"{provider}-model",
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+    }
+
+
+def sse_body(*chunks, done=True):
+    events = [f"data: {json.dumps(c)}\n\n" for c in chunks]
+    if done:
+        events.append("data: [DONE]\n\n")
+    return "".join(events)

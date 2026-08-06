@@ -3,6 +3,7 @@ import importlib.resources
 import json
 import logging
 import os
+from collections.abc import AsyncIterator
 
 import httpx
 import yaml
@@ -154,6 +155,25 @@ class UpstreamClientError(Exception):
 class AllProvidersFailedError(Exception):
     """Every provider failed, was disabled, or is in cooldown; nothing left to try."""
 
+async def _iter_stream(resp: httpx.Response) -> AsyncIterator[dict]:
+    """Yield parsed OpenAI SSE events from a streaming httpx response.
+
+    Skips non-``data:`` lines (SSE keep-alives / comments), stops at the
+    ``[DONE]`` sentinel, and always closes the upstream response so the
+    connection is released even on client disconnect or mid-stream error.
+    """
+    try:
+        async for line in resp.aiter_lines():
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[len("data:"):].strip()
+            if not data or data == "[DONE]":
+                break
+            yield json.loads(data)
+    finally:
+        await resp.aclose()
+
 class Router:
     def __init__(self, config_path=None, transport=None):
         config = load_providers_config(config_path)
@@ -240,6 +260,108 @@ class Router:
                 except json.JSONDecodeError:
                     parsed = {"raw": body.decode(errors="replace")}
                 raise UpstreamClientError(status_code=status, body=parsed) from e
+
+            except httpx.RequestError as e:
+                logger.error(f"Network error with {name}: {e}. Triggering failover.")
+                self.health_tracker.record_failure(name)
+                continue
+
+        raise AllProvidersFailedError("All providers failed or are in cooldown.")
+
+    async def stream_open(
+        self, messages: list
+    ) -> tuple[dict | None, AsyncIterator[dict]]:
+        """Open a streaming chat-completions response through the providers.
+
+        Mirrors ``route_request``'s failover decisions exactly (tier order,
+        cooldowns, missing keys, 429/5xx and 401/403 handling) so streaming
+        reuses the same routing behavior. Returns once a provider's stream is
+        live: ``(first_chunk, tail)``. ``first_chunk`` is ``None`` for a clean
+        but empty stream. Connection-stage failures fail over to the next
+        provider; a mid-stream error after the first chunk propagates to the
+        caller so it can terminate the response cleanly.
+        """
+        for provider in self.providers:
+            name = provider["name"]
+
+            if not self.health_tracker.is_available(name):
+                logger.info(f"Provider {name} in cooldown. Skipping.")
+                continue
+
+            api_key = os.getenv(provider["api_key_env"])
+            if not api_key:
+                logger.warning(
+                    f"No API key found for {name} "
+                    f"({provider['api_key_env']}). Skipping."
+                )
+                continue
+
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            trimmed_messages = trim_messages(
+                messages, provider.get("max_context", DEFAULT_MAX_CONTEXT)
+            )
+            payload = {
+                "model": provider["model_id"],
+                "messages": trimmed_messages,
+                "stream": True,
+            }
+
+            try:
+                request = self.client.build_request(
+                    "POST",
+                    f"{provider['base_url']}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=resolve_timeout(provider),
+                )
+                resp = await self.client.send(request, stream=True)
+
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    logger.warning(
+                        f"Provider {name} returned {resp.status_code}. "
+                        "Triggering failover."
+                    )
+                    self.health_tracker.record_failure(name)
+                    await resp.aclose()
+                    continue
+
+                if resp.status_code in (401, 403):
+                    logger.warning(
+                        f"Auth error from {name} ({resp.status_code}). "
+                        "Disabling provider."
+                    )
+                    self.health_tracker.disable(name)
+                    await resp.aclose()
+                    continue
+
+                if resp.status_code >= 400:
+                    body = await resp.aread()
+                    await resp.aclose()
+                    try:
+                        parsed = json.loads(body)
+                    except json.JSONDecodeError:
+                        parsed = {"raw": body.decode(errors="replace")}
+                    raise UpstreamClientError(
+                        status_code=resp.status_code, body=parsed
+                    )
+
+                tail = _iter_stream(resp)
+                try:
+                    first = await anext(tail)
+                except StopAsyncIteration:
+                    first = None
+                self.health_tracker.record_success(name)
+                return first, tail
+
+            except json.JSONDecodeError as e:
+                logger.warning(
+                    f"Malformed SSE from {name}: {e}. Triggering failover."
+                )
+                self.health_tracker.record_failure(name)
+                continue
 
             except httpx.RequestError as e:
                 logger.error(f"Network error with {name}: {e}. Triggering failover.")

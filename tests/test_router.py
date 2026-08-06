@@ -1,8 +1,12 @@
 import httpx
 import pytest
 
-from invincible.core.router import Router, UpstreamClientError
-from tests.conftest import default_providers, provider_body
+from invincible.core.router import (
+    DEFAULT_TIMEOUT_CONFIG,
+    Router,
+    UpstreamClientError,
+)
+from tests.conftest import default_providers, provider_body, sse_body, stream_chunk
 
 MESSAGES = [{"role": "user", "content": "hi"}]
 
@@ -243,3 +247,77 @@ def test_malformed_config_file_raises(tmp_path):
     path.write_text("providers: [\n  - name: unclosed\n", encoding="utf-8")
     with pytest.raises(ValueError, match="Malformed provider configuration"):
         Router(config_path=str(path))
+
+
+async def test_stream_open_returns_first_chunk_and_tail(make_router):
+    router = make_router(
+        handlers={
+            "alpha.example.com": httpx.Response(
+                200,
+                content=sse_body(
+                    stream_chunk("alpha", {"role": "assistant"}),
+                    stream_chunk("alpha", {"content": "hi"}),
+                    stream_chunk("alpha", {}, finish_reason="stop"),
+                ),
+            )
+        }
+    )
+    first, tail = await router.stream_open(MESSAGES)
+    assert first["choices"][0]["delta"] == {"role": "assistant"}
+    rest = []
+    async for chunk in tail:
+        rest.append(chunk)
+    assert [c["choices"][0]["delta"] for c in rest] == [
+        {"content": "hi"},
+        {},
+    ]
+    await router.close()
+
+
+async def test_stream_open_failover_before_first_chunk(make_router):
+    router = make_router(
+        handlers={
+            "alpha.example.com": httpx.Response(429),
+            "beta.example.com": httpx.Response(
+                200,
+                content=sse_body(stream_chunk("beta", {"role": "assistant"})),
+            ),
+        }
+    )
+    first, tail = await router.stream_open(MESSAGES)
+    assert first["model"] == "beta-model"
+    assert not router.health_tracker.is_available("alpha")
+    await router.close()
+
+
+async def test_stream_open_all_providers_fail_raises(make_router):
+    router = make_router(
+        handlers={"alpha.example.com": httpx.Response(429)}
+    )
+    with pytest.raises(Exception, match="All providers failed"):
+        await router.stream_open(MESSAGES)
+    await router.close()
+
+
+async def test_stream_open_timeout_extension_is_a_dict(make_router):
+    captured = []
+
+    def alpha_handler(request):
+        captured.append(request)
+        return httpx.Response(
+            200,
+            content=sse_body(stream_chunk("alpha", {"role": "assistant"})),
+        )
+
+    router = make_router(handlers={"alpha.example.com": alpha_handler})
+    first, _ = await router.stream_open(MESSAGES)
+    timeout = captured[0].extensions["timeout"]
+    assert isinstance(timeout, dict)
+    assert timeout == {
+        "connect": DEFAULT_TIMEOUT_CONFIG["connect"],
+        "read": DEFAULT_TIMEOUT_CONFIG["read"],
+        "write": DEFAULT_TIMEOUT_CONFIG["write"],
+        "pool": DEFAULT_TIMEOUT_CONFIG["pool"],
+    }
+    assert first["model"] == "alpha-model"
+    await router.close()
